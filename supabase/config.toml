@@ -1,0 +1,12 @@
+project_id = "skoolk"
+
+[auth]
+enabled = true
+site_url = "http://localhost:8081"
+additional_redirect_urls = ["skoolk://**"]
+enable_anonymous_sign_ins = true
+
+[functions.generate-questions]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/generate-questions/index.ts"

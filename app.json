@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Skoolk",
+    "slug": "skoolk",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.skoolk.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#7852BF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.skoolk.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "scheme": "skoolk"
+  }
+}
