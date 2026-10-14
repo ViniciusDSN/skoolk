@@ -1,18 +1,32 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewProps } from 'react-native';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Dimensions, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewProps } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 
 /** A persistent scroll cue, including on iOS where native indicators fade away. */
-export const ScrollArea = forwardRef<ScrollView, ScrollViewProps & { light?: boolean; compact?: boolean }>(
-  function ScrollArea({ children, light = false, compact = false, style, contentContainerStyle, onScroll, onLayout, onContentSizeChange, ...props }, ref) {
+export const ScrollArea = forwardRef<ScrollView, ScrollViewProps & { light?: boolean; compact?: boolean; avoidKeyboard?: boolean }>(
+  function ScrollArea({ children, light = false, compact = false, avoidKeyboard = true, style, contentContainerStyle, onScroll, onLayout, onContentSizeChange, ...props }, ref) {
     const scroll = useRef<ScrollView>(null);
     const [viewport, setViewport] = useState(0), [content, setContent] = useState(0), [offset, setOffset] = useState(0);
+    const latestOffset = useRef(0);
+    const measuredKeyboard = useKeyboardHeight();
+    const keyboard = avoidKeyboard ? measuredKeyboard : 0;
     useImperativeHandle(ref, () => scroll.current!);
+    useEffect(() => {
+      if (!keyboard) return;
+      const focused = TextInput.State.currentlyFocusedInput() as { measureInWindow?: (callback: (x: number, y: number, width: number, height: number) => void) => void } | null;
+      if (!focused?.measureInWindow) return;
+      const timer = setTimeout(() => focused.measureInWindow!((_x, y, _width, height) => {
+        const covered = y + height + 24 - (Dimensions.get('window').height - keyboard);
+        if (covered > 0) scroll.current?.scrollTo({ y: latestOffset.current + covered, animated: true });
+      }), 60);
+      return () => clearTimeout(timer);
+    }, [keyboard]);
     const contentStyle = StyleSheet.flatten(contentContainerStyle);
     const paddingBottom = Number(contentStyle?.paddingBottom ?? contentStyle?.paddingVertical ?? contentStyle?.padding ?? 0);
     const maxOffset = Math.max(0, content - viewport);
     // Bottom spacing is not hidden content and must not trigger the cue.
-    const contentEnd = Math.max(0, content - paddingBottom);
+    const contentEnd = Math.max(0, content - paddingBottom - keyboard);
     const overflow = viewport > 0 && contentEnd - viewport > 4;
     const moreBelow = overflow && contentEnd - Math.max(0, offset) - viewport > 8;
     const track = Math.max(0, viewport - 16);
@@ -21,10 +35,10 @@ export const ScrollArea = forwardRef<ScrollView, ScrollViewProps & { light?: boo
     const paddingRight = compact ? Number(contentStyle?.paddingRight ?? contentStyle?.paddingHorizontal ?? contentStyle?.padding ?? 0) + 8 : undefined;
     return <View style={[styles.container, compact && { flex: undefined, flexShrink: 1 }, style]}>
       <ScrollView {...props} ref={scroll} style={{ flexGrow: 1, flexShrink: 1 }} showsVerticalScrollIndicator={false}
-        contentContainerStyle={[contentContainerStyle, { paddingBottom }, compact && { paddingRight }]} scrollEventThrottle={16}
+        contentContainerStyle={[contentContainerStyle, { paddingBottom: paddingBottom + keyboard }, compact && { paddingRight }]} scrollEventThrottle={16}
         onLayout={event => { setViewport(event.nativeEvent.layout.height); onLayout?.(event); }}
         onContentSizeChange={(width, height) => { setContent(height); onContentSizeChange?.(width, height); }}
-        onScroll={event => { setOffset(event.nativeEvent.contentOffset.y); onScroll?.(event); }}>
+        onScroll={event => { latestOffset.current = event.nativeEvent.contentOffset.y; setOffset(event.nativeEvent.contentOffset.y); onScroll?.(event); }}>
         {children}
       </ScrollView>
       {overflow && <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.track, { backgroundColor: light ? '#FFFFFF24' : '#7852BF1A' }]}>

@@ -1,7 +1,8 @@
 import React from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
 import { BookOpen, ChevronLeft, Star } from 'lucide-react-native';
-import { colors as c, avatarColors, avatarEmoji } from '../theme';
+import { colors as c, avatarColors } from '../theme';
+import { avatarIcons } from './avatars';
 
 export function Button({ title, onPress, busy = false, disabled = false, secondary = false, icon, testID }: {
   title: string; onPress: () => void; busy?: boolean; disabled?: boolean; secondary?: boolean; icon?: React.ReactNode; testID?: string;
@@ -36,7 +37,8 @@ export function Stars({ value, onChange, disabled, size = 34, label = 'Avalia√ß√
   </View>;
 }
 export function Avatar({ name, index, size = 48 }: { name: string; index: number; size?: number }) {
-  return <View accessibilityLabel={name} style={{ width: size, height: size, borderRadius: size * .36, alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColors[index % avatarColors.length] }}><Text style={{ fontSize: size * .48 }}>{avatarEmoji[index % avatarEmoji.length]}</Text></View>;
+  const Icon = avatarIcons[index % avatarIcons.length];
+  return <View accessibilityLabel={name} style={{ width: size, height: size, borderRadius: size * .36, alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColors[index % avatarColors.length] }}><Icon size={size * .46} color={c.purpleDark} strokeWidth={1.6} /></View>;
 }
 export function BookCover({ title, uri, small = false }: { title: string; uri?: string | null; small?: boolean }) {
   const [failed, setFailed] = React.useState(false);

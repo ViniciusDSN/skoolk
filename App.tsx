@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,7 +8,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowRight, BookOpen, Check, ChevronRight, Crown, Heart, LogOut, Plus, Sparkles, X } from 'lucide-react-native';
 import type { Session } from '@supabase/supabase-js';
 import { Avatar, Back, Badge, BookCover, Button, Card, ErrorMessage, Input, typography as t } from './src/components/ui';
-import { colors as c, avatarColors, avatarEmoji } from './src/theme';
+import { colors as c, avatarColors } from './src/theme';
+import { avatarIcons } from './src/components/avatars';
+import { useKeyboardHeight } from './src/hooks/useKeyboardHeight';
 import { configured, db, supabase } from './src/lib/supabase';
 import { createRoom, ensureReader, listBooks, rpc } from './src/lib/api';
 import { friendlyError, normalizeCode, validateChapters, validateJoin } from './src/domain';
@@ -90,10 +92,11 @@ export default function App() {
     await enterRoom(await createRoom({ book, chapterStart: Number(start), chapterEnd: Number(end), questionCount: count, nickname: name.trim() }));
   });
   const addBook = () => { setBookDraft(emptyBook); setError(null); setBookModal(true); };
+  const keyboard = useKeyboardHeight();
   const lightStatus = screen === 'home' || screen === 'room';
   return <SafeAreaProvider><View style={s.outer}><SafeAreaView style={[s.app, { backgroundColor: lightStatus ? c.purple : c.background }]} edges={['top', 'bottom']}>
     <StatusBar style={lightStatus ? 'light' : 'dark'} />
-    {!ready ? <View style={s.loading}><ActivityIndicator color="#fff" size="large" /><Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>skoolk.</Text></View> : screen === 'room' && roomId ? <RoomScreen key={roomId} roomId={roomId} userId={session?.user.id ?? ''} demo={demo} onLeave={leaveRoom} /> : <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    {!ready ? <View style={s.loading}><ActivityIndicator color="#fff" size="large" /><Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>skoolk.</Text></View> : screen === 'room' && roomId ? <RoomScreen key={roomId} roomId={roomId} userId={session?.user.id ?? ''} demo={demo} onLeave={leaveRoom} /> : <View style={{ flex: 1 }}>
       <ScrollArea contentContainerStyle={{ flexGrow: 1, paddingBottom: 28, backgroundColor: c.background }} keyboardShouldPersistTaps="handled">
       {screen === 'home' ? <>
         <LinearGradient colors={['#926CE4', '#7550B8']} style={s.hero}>
@@ -105,7 +108,7 @@ export default function App() {
           <Card style={{ marginTop: -20, gap: 19 }}><View style={{ gap: 5 }}><Text style={[t.title, { fontSize: 25 }]}>Entre na conversa</Text><Text style={t.subtitle}>Pegue o código com a anfitriã e chegue mais.</Text></View>
             <Input label="Código do encontro" placeholder="EX.: ABC234" value={code} onChangeText={value => setCode(normalizeCode(value))} autoCapitalize="characters" autoCorrect={false} maxLength={6} style={{ fontSize: 19, letterSpacing: 5, fontWeight: '600' }} />
             <Input label="Como podemos te chamar?" placeholder="Seu nome ou apelido" value={name} onChangeText={setName} maxLength={24} autoComplete="nickname" onSubmitEditing={join} returnKeyType="go" />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{avatarEmoji.map((emoji, i) => <Pressable key={emoji} accessibilityRole="button" accessibilityLabel={`Avatar ${i + 1}`} accessibilityState={{ selected: avatar === i }} onPress={() => setAvatar(i)} style={[s.avatarOption, { backgroundColor: avatarColors[i], borderColor: avatar === i ? c.purple : 'transparent' }]}><Text style={{ fontSize: 22 }}>{emoji}</Text></Pressable>)}</View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{avatarIcons.map((Icon, i) => <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Avatar ${i + 1}`} accessibilityState={{ selected: avatar === i }} onPress={() => setAvatar(i)} style={[s.avatarOption, { backgroundColor: avatarColors[i], borderColor: avatar === i ? c.purple : 'transparent' }]}><Icon size={21} color={c.purpleDark} strokeWidth={1.6} /></Pressable>)}</View>
             <ErrorMessage message={error} /><Button title="Entrar no encontro" onPress={join} busy={busy} icon={<ArrowRight size={18} color="#fff" />} /><View style={[s.row, { justifyContent: 'center', gap: 5 }]}><Check size={12} color={c.muted} /><Text style={{ fontSize: 10, color: c.muted }}>Sem cadastro. Só você e uma boa conversa.</Text></View>
           </Card>
           <Pressable accessibilityRole="button" accessibilityLabel="Sou anfitriã" onPress={() => navigate(isHost ? 'host' : 'auth')} style={s.hostEntry}><View style={s.crown}><Crown size={22} color={c.purple} strokeWidth={1.5} /></View><View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.ink, fontWeight: '600', fontSize: 13 }}>Você prepara o encontro?</Text><Text style={{ color: c.muted, fontSize: 11 }}>Acesse o espaço da anfitriã</Text></View><ChevronRight size={19} color={c.purple} /></Pressable>
@@ -138,8 +141,8 @@ export default function App() {
         </View>
       </>}
       </ScrollArea>
-    </KeyboardAvoidingView>}
-    <Modal visible={bookModal} transparent animationType="slide" onRequestClose={() => setBookModal(false)}><KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={s.sheet}><ScrollArea compact keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, gap: 20 }}><View style={s.between}><Text style={t.section}>Mais uma história na estante</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBookModal(false)} style={s.centerButton}><X color={c.muted} size={20} /></Pressable></View><Input label="Título do livro" placeholder="Uma nova leitura" value={bookDraft.title} onChangeText={title => setBookDraft({ ...bookDraft, title })} maxLength={160} /><Input label="Autoria" placeholder="Quem escreveu?" value={bookDraft.author} onChangeText={author => setBookDraft({ ...bookDraft, author })} maxLength={160} /><Input label="Sinopse e contexto da leitura" placeholder="Adicione a sinopse e um resumo dos capítulos para ajudar a IA a criar perguntas precisas." multiline value={bookDraft.synopsis} onChangeText={synopsis => setBookDraft({ ...bookDraft, synopsis })} maxLength={12000} /><Input label="Link da imagem da capa (opcional)" placeholder="https://…" value={bookDraft.cover_url ?? ''} onChangeText={cover_url => setBookDraft({ ...bookDraft, cover_url })} autoCapitalize="none" keyboardType="url" /><ErrorMessage message={error} /><Button title="Guardar na estante" onPress={saveBook} busy={busy} icon={<Plus size={18} color="#fff" />} /></ScrollArea></View></KeyboardAvoidingView></Modal>
+    </View>}
+    <Modal visible={bookModal} transparent animationType="slide" onRequestClose={() => setBookModal(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><View style={s.sheet}><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, gap: 20 }}><View style={s.between}><Text style={t.section}>Mais uma história na estante</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBookModal(false)} style={s.centerButton}><X color={c.muted} size={20} /></Pressable></View><Input label="Título do livro" placeholder="Uma nova leitura" value={bookDraft.title} onChangeText={title => setBookDraft({ ...bookDraft, title })} maxLength={160} /><Input label="Autoria" placeholder="Quem escreveu?" value={bookDraft.author} onChangeText={author => setBookDraft({ ...bookDraft, author })} maxLength={160} /><Input label="Sinopse e contexto da leitura" placeholder="Adicione a sinopse e um resumo dos capítulos para ajudar a IA a criar perguntas precisas." multiline value={bookDraft.synopsis} onChangeText={synopsis => setBookDraft({ ...bookDraft, synopsis })} maxLength={12000} /><Input label="Link da imagem da capa (opcional)" placeholder="https://…" value={bookDraft.cover_url ?? ''} onChangeText={cover_url => setBookDraft({ ...bookDraft, cover_url })} autoCapitalize="none" keyboardType="url" /><ErrorMessage message={error} /><Button title="Guardar na estante" onPress={saveBook} busy={busy} icon={<Plus size={18} color="#fff" />} /></ScrollArea></View></View></Modal>
   </SafeAreaView></View></SafeAreaProvider>;
 }
 const s = StyleSheet.create({

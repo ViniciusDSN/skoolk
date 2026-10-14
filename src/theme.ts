@@ -4,4 +4,3 @@ export const colors = {
   gold: '#E4B55B', success: '#427F68', danger: '#AC435C',
 };
 export const avatarColors = ['#E9DAFC', '#F9E3BD', '#D9EBE0', '#F4DDE6', '#DDE5F7', '#E9E0D5'];
-export const avatarEmoji = ['🦊', '🌻', '🌿', '🌷', '🦋', '☕'];
