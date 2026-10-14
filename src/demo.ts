@@ -10,8 +10,8 @@ export const demoSnapshot: RoomSnapshot = {
     { room_id: 'demo', user_id: 'reader-3', nickname: 'Bia', avatar: 1, joined_at: '' },
   ],
   questions: [
-    { id: 'demo-1', room_id: 'demo', position: 0, category: 'Personagens', prompt: 'O que faz alguém se sentir parte de um grupo?', hint: 'Pense nas primeiras interações de Neil com os Raposas. Quais gestos aproximam e quais criam distância?' },
-    { id: 'demo-2', room_id: 'demo', position: 1, category: 'Conexões', prompt: 'Confiar em alguém é uma escolha ou uma conquista?', hint: 'Converse sobre os limites que os personagens estabelecem. Você se reconheceu em algum deles?' },
-    { id: 'demo-3', room_id: 'demo', position: 2, category: 'Entrelinhas', prompt: 'O que o silêncio de um personagem pode revelar?', hint: 'Compartilhe um momento da leitura em que o que não foi dito chamou sua atenção.' },
+    { id: 'demo-1', room_id: 'demo', position: 0, category: 'Personagens', prompt: 'O que faz alguém se sentir parte de um grupo?', hint: 'Pense nas primeiras interações de Neil com os Raposas. Quais gestos aproximam e quais criam distância?', source: 'manual' },
+    { id: 'demo-2', room_id: 'demo', position: 1, category: 'Conexões', prompt: 'Confiar em alguém é uma escolha ou uma conquista?', hint: 'Converse sobre os limites que os personagens estabelecem. Você se reconheceu em algum deles?', source: 'manual' },
+    { id: 'demo-3', room_id: 'demo', position: 2, category: 'Entrelinhas', prompt: 'O que o silêncio de um personagem pode revelar?', hint: 'Compartilhe um momento da leitura em que o que não foi dito chamou sua atenção.', source: 'manual' },
   ], ratings: [], feedback: [],
 };

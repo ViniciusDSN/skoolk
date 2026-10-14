@@ -8,10 +8,19 @@ import { ArrowRight, BookOpen, Check, ChevronRight, Copy, LogOut, MessageCircle,
 import { ScrollArea } from '../components/ScrollArea';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useRoom } from '../hooks/useRoom';
-import { generateQuestions, rpc } from '../lib/api';
+import { generateQuestions, loadRoom, rpc, saveQuestions } from '../lib/api';
 import { average, friendlyError, nextPhase, rankedQuestions } from '../domain';
 import { colors as c } from '../theme';
 import { Avatar, Badge, BookCover, Button, Card, ErrorMessage, Input, Stars, typography as t } from '../components/ui';
+import type { Question, QuestionDraft } from '../types';
+
+const BLANK: QuestionDraft = { prompt: '', category: 'Discussão', hint: 'Compartilhe sua leitura e escute os outros pontos de vista.', source: 'manual' };
+const seedDrafts = (questions: Question[], count: number): QuestionDraft[] =>
+  Array.from({ length: count }, (_, index) => {
+    const saved = questions.find(q => q.position === index);
+    return saved ? { prompt: saved.prompt, category: saved.category, hint: saved.hint, source: saved.source } : { ...BLANK };
+  });
+const written = (drafts: QuestionDraft[]) => drafts.filter(d => d.prompt.trim().length > 0);
 
 export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; userId: string; demo: boolean; onLeave: () => void }) {
   const { snapshot: data, setSnapshot, error: loadError, connected, refresh } = useRoom(roomId, demo);
@@ -19,7 +28,7 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<'share' | 'leave' | 'advance' | null>(null), [copied, setCopied] = useState(false);
   const [rating, setRating] = useState(0), [bookRating, setBookRating] = useState(0), [discussionRating, setDiscussionRating] = useState(0);
-  const [questionsModal, setQuestionsModal] = useState<'write' | 'preview' | null>(null), [drafts, setDrafts] = useState<string[]>([]);
+  const [questionsOpen, setQuestionsOpen] = useState(false), [drafts, setDrafts] = useState<QuestionDraft[]>([]);
   const scrollRef = useRef<ScrollView>(null);
   const keyboard = useKeyboardHeight();
   const me = demo ? 'demo-host' : userId;
@@ -36,6 +45,7 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
   };
   if (!data || !room) return <View style={s.loading}><ActivityIndicator color={c.purple} size="large" /><Text style={t.subtitle}>Abrindo seu encontro…</Text><ErrorMessage message={loadError} />{loadError && <><Button title="Tentar novamente" onPress={() => void refresh()} /><Button title="Voltar ao início" secondary onPress={onLeave} /></>}</View>;
   const votes = data.ratings.filter(r => r.question_id === question?.id);
+  const filled = written(drafts).length;
   const isFinished = room.phase === 'finished';
   const advance = () => void act(async () => {
     setModal(null);
@@ -53,11 +63,26 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
     if (demo) setSnapshot({ ...data, feedback: [{ room_id: room.id, user_id: me, book_stars: bookRating, discussion_stars: discussionRating }] });
     else await rpc('skoolk_submit_feedback', { p_room: room.id, p_book: bookRating, p_discussion: discussionRating });
   });
-  const saveQuestions = () => void act(async () => {
-    if (drafts.some(prompt => prompt.trim().length < 10)) throw new Error('Escreva pelo menos 10 caracteres em cada pergunta.');
-    await rpc('skoolk_write_questions', { p_room: room.id, p_questions: drafts.map(prompt => ({ prompt: prompt.trim(), category: 'Discussão', hint: 'Compartilhe sua leitura e escute os outros pontos de vista.' })) });
-    setQuestionsModal(null);
+  const trimmed = () => {
+    const filled = written(drafts);
+    if (filled.some(d => d.prompt.trim().length < 10)) throw new Error('Cada pergunta escrita precisa de pelo menos 10 caracteres.');
+    return filled.map(d => ({ ...d, prompt: d.prompt.trim() }));
+  };
+  const persistQuestions = () => void act(async () => {
+    const filled = trimmed();
+    if (!filled.length) throw new Error('Escreva ao menos uma pergunta ou gere as restantes com a IA.');
+    await saveQuestions(room.id, filled);
+    setQuestionsOpen(false);
   });
+  const fillWithAI = () => void act(async () => {
+    const filled = trimmed();
+    if (filled.length) await saveQuestions(room.id, filled);
+    await generateQuestions(room.id);
+    const fresh = await loadRoom(room.id);
+    setSnapshot(fresh);
+    setDrafts(seedDrafts(fresh.questions, fresh.room.question_count));
+  });
+  const openQuestions = () => { setError(null); setDrafts(seedDrafts(data?.questions ?? [], room?.question_count ?? 0)); setQuestionsOpen(true); };
   const joinUrl = Linking.createURL('/', { queryParams: { code: room.code } });
   return <LinearGradient colors={['#916CE1', '#7452B7']} style={{ flex: 1 }}>
     <ScrollArea ref={scrollRef} light contentContainerStyle={{ paddingBottom: 24 }}>
@@ -82,9 +107,9 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
             {!demo && <Text style={[t.subtitle, { textAlign: 'center', fontSize: 12 }]}>Quem entrar com o código aparece aqui.</Text>}
           </Card>
           {host && <Card style={{ gap: 14 }}><Text style={t.eyebrow}>ESCOLHA UMA DINÂMICA</Text><View style={s.row}><View style={s.iconTile}><MessageCircle size={23} color={c.purple} /></View><View style={{ flex: 1, gap: 4 }}><Text style={t.section}>Entre perguntas e páginas</Text><Text style={[t.subtitle, { fontSize: 12 }]}>{room.question_count} perguntas para abrir a conversa</Text></View></View>
-            {data.questions.length > 0 && <View style={s.row}><Check size={16} color={c.success} /><Text style={{ color: c.success, fontSize: 12 }}>{data.questions.length} perguntas prontas para discutir</Text></View>}
+            {data.questions.length > 0 && <View style={s.row}><Check size={16} color={c.success} /><Text style={{ color: c.success, fontSize: 12 }}>{data.questions.length} de {room.question_count} perguntas prontas</Text></View>}
             <Text style={[t.subtitle, { fontSize: 11, textAlign: 'center' }]}>A conversa é de vocês. A primeira pergunta, por nossa conta.</Text>
-            {data.questions.length > 0 ? <Button title="Revisar perguntas" secondary onPress={() => setQuestionsModal('preview')} /> : <Button title="Escrever minhas perguntas" secondary disabled={busy} onPress={() => { setError(null); setDrafts(Array.from({ length: room.question_count }, () => '')); setQuestionsModal('write'); }} />}
+            <Button title={data.questions.length ? 'Revisar e completar perguntas' : 'Preparar as perguntas'} secondary disabled={busy} onPress={openQuestions} />
           </Card>}
           {!host && <View style={{ gap: 12, padding: 15, alignItems: 'center' }}><ActivityIndicator color="#fff" /><Text style={s.whiteSubtitle}>Esperando a anfitriã começar…</Text></View>}
           <Pressable accessibilityRole="button" onPress={() => setTab(tab === 'synopsis' ? 'questions' : 'synopsis')} style={s.textButton}><BookOpen size={17} color="#EFE7FB" /><Text style={s.whiteSubtitle}>{tab === 'synopsis' ? 'Ocultar sinopse' : 'Relembrar a sinopse'}</Text></Pressable>
@@ -94,13 +119,13 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
           <Card><Text style={[t.section, { textAlign: 'center' }]}>Como foi esse capítulo?</Text><Text style={[t.subtitle, { textAlign: 'center', fontSize: 12 }]}>Sua opinião ajuda a preparar os próximos encontros.</Text><View style={s.ratingBlock}><Text style={s.ratingLabel}>Como você avalia a discussão?</Text><Stars label="Discussão" value={discussionRating} onChange={setDiscussionRating} disabled={!!myFeedback || busy} /></View><View style={s.ratingBlock}><Text style={s.ratingLabel}>E o livro, o que achou?</Text><Stars label="Livro" value={bookRating} onChange={setBookRating} disabled={!!myFeedback || busy} /></View>
             {myFeedback ? <View style={[s.row, { justifyContent: 'center' }]}><Check size={18} color={c.success} /><Text style={{ color: c.success, fontSize: 13 }}>Avaliações enviadas. Obrigada!</Text></View> : <Button title="Enviar minha opinião" busy={busy} disabled={!bookRating || !discussionRating} onPress={submitFeedback} />}
           </Card>
-          {host && <Card><View style={s.between}><Text style={t.section}>As favoritas do encontro</Text><Star size={19} color={c.gold} /></View>{rankedQuestions(data.questions, data.ratings).map((q, index) => <View key={q.id} style={{ gap: 8, borderTopWidth: index ? 1 : 0, borderColor: c.line, paddingTop: index ? 16 : 0 }}><View style={s.between}><Badge>{q.category}</Badge><Text style={{ color: c.purple, fontWeight: '700' }}>{q.votes ? q.average.toFixed(1) : '—'} ★</Text></View><Text style={{ color: c.ink, fontSize: 13, lineHeight: 20 }}>{q.prompt}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{q.votes} avaliações</Text></View>)}<Text style={t.subtitle}>{data.feedback.length} opiniões sobre o encontro</Text></Card>}
+          {host && <Card><View style={s.between}><Text style={t.section}>As favoritas do encontro</Text><Star size={19} color={c.gold} /></View>{rankedQuestions(data.questions, data.ratings).map((q, index) => <View key={q.id} style={{ gap: 8, borderTopWidth: index ? 1 : 0, borderColor: c.line, paddingTop: index ? 16 : 0 }}><View style={s.between}><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}><Badge>{q.category}</Badge>{q.source === 'ia' && <Badge>IA</Badge>}</View><Text style={{ color: c.purple, fontWeight: '700' }}>{q.votes ? q.average.toFixed(1) : '—'} ★</Text></View><Text style={{ color: c.ink, fontSize: 13, lineHeight: 20 }}>{q.prompt}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{q.votes} avaliações</Text></View>)}<Text style={t.subtitle}>{data.feedback.length} opiniões sobre o encontro</Text></Card>}
         </> : <>
           <View style={s.tabs}>{(['synopsis', 'questions'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => setTab(value)} style={[s.tab, tab === value && s.tabActive]}><Text style={[s.tabText, tab === value && { color: '#fff', fontWeight: '600' }]}>{value === 'synopsis' ? 'Sinopse' : 'Perguntas'}</Text></Pressable>)}</View>
           {tab === 'synopsis' ? <Card style={{ minHeight: 350, justifyContent: 'center' }}><BookOpen size={28} color={c.purple} style={{ alignSelf: 'center' }} /><Text style={[t.section, { textAlign: 'center' }]}>{room.book_title}</Text><Text style={s.synopsis}>{room.synopsis || 'A anfitriã ainda não adicionou uma sinopse.'}</Text></Card> : <>
             <View style={s.cardStack}><View style={s.stackBack} /><View style={s.stackMiddle} /><Card style={{ minHeight: 363, padding: 24 }}>
               <View style={s.between}><Text style={{ color: c.purple, fontSize: 12, fontWeight: '600' }}>{String(room.current_question + 1).padStart(2, '0')} <Text style={{ color: '#BFB4CF', fontWeight: '400' }}>/ {String(room.question_count).padStart(2, '0')}</Text></Text><Badge>{room.phase === 'rating' ? 'HORA DE AVALIAR' : 'EM DISCUSSÃO'}</Badge></View>
-              <View style={{ alignItems: 'center', paddingTop: 6, gap: 9 }}><View style={[s.iconTile, { borderRadius: 30, width: 42, height: 42 }]}><MessageCircle size={21} color={c.purple} /></View><Text style={{ color: c.purple, fontSize: 11 }}>{question?.category ?? 'Carregando'}</Text></View>
+              <View style={{ alignItems: 'center', paddingTop: 6, gap: 9 }}><View style={[s.iconTile, { borderRadius: 30, width: 42, height: 42 }]}><MessageCircle size={21} color={c.purple} /></View><Text style={{ color: c.purple, fontSize: 11 }}>{question?.category ?? 'Carregando'}{question?.source === 'ia' ? ' · gerada por IA' : ''}</Text></View>
               <Text style={s.question}>{question?.prompt ?? 'Carregando a próxima pergunta…'}</Text><Text style={s.hint}>{question?.hint}</Text>
               {room.phase === 'rating' ? <View style={s.ratingBlock}><Text style={s.ratingLabel}>Essa pergunta rendeu uma boa conversa?</Text><Stars label="Pergunta" value={rating} onChange={setRating} disabled={busy || !!savedRating} /><View style={s.between}><Text style={s.starLabel}>Nem tanto</Text><Text style={s.starLabel}>Rendeu muito!</Text></View>{savedRating ? <Text style={{ color: c.success, textAlign: 'center', fontSize: 12, marginTop: 12 }}>✓ Sua avaliação foi registrada</Text> : <Button title="Enviar avaliação" busy={busy} disabled={!rating} onPress={submitRating} />}</View> : <View style={s.discussNote}><Users size={16} color={c.muted} /><Text style={{ color: c.muted, fontSize: 11 }}>Escute, compartilhe, descubra outro ponto de vista.</Text></View>}
             </Card></View>
@@ -111,13 +136,17 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
       </View>
     </ScrollArea>
     <View style={s.actionBar}>
-      {host && room.phase === 'lobby' && (data.questions.length ? <Button title="Começar a dinâmica" busy={busy} onPress={advance} icon={<ArrowRight size={18} color="#fff" />} /> : <Button title="Gerar perguntas com IA" busy={busy} onPress={() => void act(async () => { await generateQuestions(room.id); })} icon={<Sparkles size={18} color="#fff" />} />)}
+      {host && room.phase === 'lobby' && (data.questions.length >= room.question_count ? <Button title="Começar a dinâmica" busy={busy} onPress={advance} icon={<ArrowRight size={18} color="#fff" />} /> : <Button title={data.questions.length ? 'Completar as perguntas' : 'Preparar as perguntas'} busy={busy} onPress={openQuestions} icon={<Sparkles size={18} color="#fff" />} />)}
       {room.phase !== 'lobby' && !isFinished && (host ? <View style={{ gap: 6 }}><View style={s.between}><Text style={s.whiteSubtitle}>{room.phase === 'rating' ? `${votes.length} de ${data.members.length} avaliações` : 'Todo mundo já compartilhou?'}</Text>{room.phase === 'rating' && <Text style={{ color: '#fff', fontSize: 12 }}>{votes.length ? average(votes).toFixed(1) + ' ★' : ''}</Text>}</View><Button secondary title={room.phase === 'discussion' ? 'Encerrar pergunta e avaliar' : room.current_question + 1 >= room.question_count ? 'Finalizar encontro' : 'Próxima pergunta'} busy={busy} onPress={() => room.phase === 'rating' && votes.length < data.members.length && !demo ? setModal('advance') : advance()} icon={<ChevronRight size={19} color={c.purple} />} /></View> : <View style={s.textButton}><View style={[s.dot, { position: 'relative', backgroundColor: '#D9C9F0', right: 0, top: 0 }]} /><Text style={s.whiteSubtitle}>{room.phase === 'rating' && savedRating ? 'Aguardando a próxima pergunta…' : 'A anfitriã conduz a conversa.'}</Text></View>)}
       {isFinished ? <Button title="Voltar para o início" secondary onPress={onLeave} /> : <Pressable accessibilityRole="button" onPress={() => setModal('leave')} style={s.textButton}><LogOut size={15} color="#EFE7FB" /><Text style={{ color: '#EFE7FB', fontSize: 12 }}>{host ? 'Sair da sala' : 'Sair do encontro'}</Text></Pressable>}
     </View>
-    <Modal visible={!!questionsModal} transparent animationType="slide" onRequestClose={() => setQuestionsModal(null)}><View style={[s.overlay, { paddingBottom: keyboard }]}><Card style={{ width: '100%', maxWidth: 400, maxHeight: '90%', padding: 20 }}><View style={s.between}><Text style={[t.section, { flex: 1 }]}>{questionsModal === 'write' ? 'A conversa começa com você' : 'Perguntas do encontro'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar perguntas" onPress={() => setQuestionsModal(null)} style={{ padding: 8 }}><X size={20} color={c.muted} /></Pressable></View><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 18 }}>
-      {questionsModal === 'write' ? <><Text style={t.subtitle}>Escreva {room.question_count} perguntas abertas para discutir com o clube.</Text>{drafts.map((prompt, index) => <Input key={index} label={`Pergunta ${index + 1}`} multiline maxLength={600} value={prompt} onChangeText={value => setDrafts(previous => previous.map((text, i) => i === index ? value : text))} placeholder="O que vocês gostariam de conversar?" />)}</> : data.questions.map((q, index) => <View key={q.id} style={{ gap: 10 }}><Badge>{index + 1} · {q.category}</Badge><Text style={{ color: c.ink, fontSize: 16, lineHeight: 23 }}>{q.prompt}</Text><Text style={t.subtitle}>{q.hint}</Text></View>)}
-    </ScrollArea>{questionsModal === 'write' && <><ErrorMessage message={error} /><Button title="Preparar estas perguntas" busy={busy} onPress={saveQuestions} /></>}</Card></View></Modal>
+    <Modal visible={questionsOpen} transparent animationType="slide" onRequestClose={() => setQuestionsOpen(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><Card style={{ width: '100%', maxWidth: 400, maxHeight: '90%', padding: 20 }}><View style={s.between}><Text style={[t.section, { flex: 1 }]}>A conversa começa com você</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar perguntas" onPress={() => setQuestionsOpen(false)} style={{ padding: 8 }}><X size={20} color={c.muted} /></Pressable></View><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 18 }}>
+      <Text style={t.subtitle}>Escreva as que quiser e deixe o resto com a IA. {filled} de {room.question_count} prontas.</Text>
+      {drafts.map((draft, index) => <View key={index} style={{ gap: 8 }}>
+        <View style={s.between}><Text style={s.draftLabel}>Pergunta {index + 1}</Text>{draft.prompt.trim().length > 0 && <Badge>{draft.source === 'ia' ? 'DA IA' : 'SUA'}</Badge>}</View>
+        <Input multiline maxLength={600} value={draft.prompt} placeholder="O que vocês gostariam de conversar?" onChangeText={value => setDrafts(previous => previous.map((item, i) => i === index ? { ...item, prompt: value, source: 'manual' } : item))} />
+      </View>)}
+    </ScrollArea><ErrorMessage message={error} /><Button title="Preparar estas perguntas" busy={busy} onPress={persistQuestions} />{filled < room.question_count && <Button secondary title={'Gerar as ' + (room.question_count - filled) + ' restantes com IA'} busy={busy} onPress={fillWithAI} icon={<Sparkles size={17} color={c.purple} />} />}</Card></View></Modal>
     <Modal visible={!!modal} transparent animationType="fade" onRequestClose={() => setModal(null)}>
       <View style={s.overlay}><Card style={{ width: '100%', maxWidth: 370, maxHeight: '90%', gap: 18 }}><View style={s.between}><Text style={[t.section, { flex: 1 }]}>{modal === 'share' ? 'Tem lugar para mais um.' : modal === 'advance' ? 'Ainda faltam algumas estrelas' : 'Sair do encontro?'}</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setModal(null)} style={{ padding: 8 }}><X size={20} color={c.muted} /></Pressable></View>
         <ScrollArea compact contentContainerStyle={{ gap: 18 }}>{modal === 'share' ? <><Text style={t.subtitle}>{demo ? 'Este código é apenas da demonstração local.' : 'Compartilhe o código ou o QR para entrar no encontro.'}</Text>{!demo && <View style={{ alignItems: 'center', padding: 12 }}><QRCode value={joinUrl} size={176} color={c.purpleDark} backgroundColor="#fff" /></View>}<Text style={{ fontSize: 34, letterSpacing: 6, color: c.purple, fontWeight: '700', textAlign: 'center' }}>{room.code}</Text><Button title={copied ? 'Código copiado!' : 'Copiar código'} onPress={() => void act(async () => { await Clipboard.setStringAsync(room.code); setCopied(true); })} icon={<Copy size={17} color="#fff" />} />{!demo && <Button title="Compartilhar convite" secondary onPress={() => void act(async () => { await Share.share({ message: `Vamos ler juntos? Entre no Skoolk com o código ${room.code}: ${joinUrl}` }); })} icon={<Share2 size={17} color={c.purple} />} />}</> : <><Text style={t.subtitle}>{modal === 'advance' ? 'Ao continuar, a avaliação desta pergunta será encerrada para todos. Você pode esperar mais um pouco.' : host ? 'O encontro continua aberto. Você pode voltar pelo painel da anfitriã.' : 'Você poderá voltar usando o mesmo código e nome neste dispositivo.'}</Text><Button title={modal === 'advance' ? 'Continuar agora' : 'Sair da sala'} onPress={modal === 'advance' ? advance : onLeave} /><Button title={modal === 'advance' ? 'Esperar os leitores' : 'Continuar no encontro'} secondary onPress={() => setModal(null)} /></>}
@@ -148,5 +177,6 @@ const s = StyleSheet.create({
   discussNote: { borderTopWidth: 1, borderColor: c.line, paddingTop: 18, alignItems: 'center', gap: 9 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, paddingTop: 6 }, progressDot: { height: 5, width: 5, backgroundColor: '#B398D5', borderRadius: 10 },
   finishHero: { gap: 15, alignItems: 'center', paddingVertical: 15 }, finishIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF18', alignItems: 'center', justifyContent: 'center' },
+  draftLabel: { color: c.ink, fontWeight: '600', fontSize: 12 },
   overlay: { flex: 1, backgroundColor: '#241630AA', justifyContent: 'center', alignItems: 'center', padding: 24 },
 });

@@ -7,7 +7,9 @@ export type Room = {
   created_at: string; generation_token?: string | null;
 };
 export type Member = { room_id: string; user_id: string; nickname: string; avatar: number; joined_at: string };
-export type Question = { id: string; room_id: string; position: number; category: string; prompt: string; hint: string };
+export type QuestionSource = 'manual' | 'ia';
+export type Question = { id: string; room_id: string; position: number; category: string; prompt: string; hint: string; source: QuestionSource };
+export type QuestionDraft = { prompt: string; category: string; hint: string; source: QuestionSource };
 export type Rating = { room_id: string; question_id: string; user_id: string; stars: number };
 export type Feedback = { room_id: string; user_id: string; book_stars: number; discussion_stars: number };
 export type RoomSnapshot = { room: Room; members: Member[]; questions: Question[]; ratings: Rating[]; feedback: Feedback[] };

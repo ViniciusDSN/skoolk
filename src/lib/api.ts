@@ -1,5 +1,5 @@
 import { db } from './supabase';
-import type { Book, RoomInput, RoomSnapshot } from '../types';
+import type { Book, QuestionDraft, RoomInput, RoomSnapshot } from '../types';
 
 export async function ensureReader() {
   const client = db();
@@ -35,16 +35,33 @@ export async function loadRoom(id: string): Promise<RoomSnapshot> {
   return { room: results[0].data, members: results[1].data, questions: results[2].data,
     ratings: results[3].data, feedback: results[4].data } as unknown as RoomSnapshot;
 }
+function edgeFailure(status?: number): string {
+  if (status === 404) return 'A geração por IA ainda não foi publicada neste projeto. Avise quem cuida do back-end.';
+  if (status === 401 || status === 403) return 'Entre novamente como anfitriã para gerar perguntas.';
+  if (status === 429) return 'O limite de solicitações da IA foi atingido. Tente mais tarde ou escreva suas perguntas.';
+  if (status === 503) return 'A geração por IA ainda está sendo configurada. Escreva suas perguntas por enquanto.';
+  if (status && status >= 500) return 'A IA não respondeu agora. Tente novamente ou escreva suas perguntas.';
+  return 'Não foi possível falar com a geração por IA. Confira sua conexão e tente novamente.';
+}
+async function edgeError(error: unknown): Promise<Error> {
+  const context = (error as { context?: Record<string, unknown> } | null)?.context;
+  const status = typeof context?.status === 'number' ? context.status : undefined;
+  const read = context?.json ?? context?.text;
+  let payload: unknown = null;
+  if (typeof read === 'function') {
+    payload = await (read as () => Promise<unknown>).call(context).catch(() => null);
+    if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = null; } }
+  }
+  const message = payload && typeof payload === 'object' && 'error' in payload ? String((payload as { error: unknown }).error) : null;
+  return new Error(message || edgeFailure(status));
+}
 export async function generateQuestions(roomId: string) {
   const { data, error } = await db().functions.invoke('generate-questions', { body: { roomId } });
-  if (error) {
-    if ('context' in error && error.context instanceof Response) {
-      const body = await error.context.json().catch(() => null);
-      if (body?.error) throw new Error(body.error);
-    }
-    throw error;
-  }
+  if (error) throw await edgeError(error);
   if (data?.error) throw new Error(data.error);
+}
+export async function saveQuestions(roomId: string, questions: QuestionDraft[]) {
+  return rpc('skoolk_save_questions', { p_room: roomId, p_questions: questions });
 }
 export async function listBooks(): Promise<Book[]> {
   const { data, error } = await db().from('skoolk_books').select('*').order('created_at', { ascending: false });
