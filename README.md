@@ -19,9 +19,9 @@ Em outra máquina, copie `.env.example` para `.env` e preencha a chave **publish
 
 1. Entre em **Sou anfitriã**, crie uma conta e confirme o e-mail. Depois entre com sua senha.
 2. Adicione um livro à estante, com autoria, sinopse e, de preferência, contexto dos capítulos. A imagem da capa é opcional, por URL HTTPS.
-3. Crie um encontro, selecione os capítulos e escolha 3, 6, 9 ou 12 perguntas. Compartilhe o código ou o QR Code da sala.
+3. Crie um encontro, selecione os capítulos e escolha 3, 6, 9 ou 12 perguntas. No card **Plano das perguntas**, toque em cada pergunta para definir o assunto (Personagens, Enredo, Temas, Ambientação, Narrativa ou Você leitor) e o momento do livro (Começo, Meio, Desfecho ou Tudo). Os slots deixados em branco ficam por conta da IA. Compartilhe o código ou o QR Code da sala.
 4. Os leitores digitam o código e um apelido. Os participantes aparecem na sala em tempo real.
-5. Gere perguntas com Gemini 3.8 Flash ou escreva suas próprias perguntas. Revise antes de iniciar.
+5. Gere perguntas com Gemini 3.5 Flash-Lite ou escreva suas próprias perguntas. A IA recebe o plano e preenche apenas os slots vazios, respeitando a posição de cada pergunta escrita à mão. Revise antes de iniciar.
 6. A anfitriã conduz a discussão, abre a avaliação de 1 a 5 estrelas e avança. Ao avançar, a votação anterior é encerrada para todos.
 7. Ao terminar, os participantes avaliam o livro e a conversa. A anfitriã vê as perguntas mais bem avaliadas.
 
@@ -29,15 +29,17 @@ O app restaura a sessão e o último encontro no mesmo dispositivo. Sair da tela
 
 ## Supabase e IA
 
-O projeto `isgkhdwscrzfaersegal` está configurado com login anônimo, três migrações aplicadas, Realtime e a Edge Function `generate-questions`. O servidor MCP foi adicionado e autenticado via OAuth.
+O projeto `xsvrgnqgkiorwiluwvvw` está configurado com login anônimo, seis migrações aplicadas, Realtime e a Edge Function `generate-questions`. O servidor MCP foi adicionado e autenticado via OAuth.
 
 O cadastro de anfitriãs depende da entrega do e-mail de confirmação. Não foi configurado SMTP próprio nesta entrega: o [serviço padrão do Supabase](https://supabase.com/docs/guides/auth/auth-smtp) limita o projeto a dois e-mails por hora e só envia para endereços da equipe. Configure SMTP próprio antes de abrir cadastros para outros endereços. Os testes automatizados criam contas isoladas já confirmadas pela API administrativa; não validam a entrega de e-mails. A entrada anônima dos leitores não envia e-mail.
 
 As tabelas `skoolk_books`, `skoolk_rooms`, `skoolk_members`, `skoolk_questions`, `skoolk_ratings` e `skoolk_feedback` têm RLS. Operações de sala usam RPCs com validação de identidade, participação, anfitriã e fase do encontro. A versão da sala impede avanços duplicados; cada pessoa só pode registrar um voto por pergunta.
 
-A chave do Gemini fica no secret `GEMINI_API_KEY` da Edge Function. O modelo é `gemini-3.8-flash`, configurável pelo secret `GEMINI_MODEL`. O aplicativo recebe apenas a URL e a chave pública do Supabase. Nunca coloque chaves Gemini, `service_role` ou secret em variáveis `EXPO_PUBLIC_*`.
+A chave do Gemini fica no secret `GEMINI_API_KEY` da Edge Function. O modelo é `gemini-3.5-flash-lite`, configurável pelo secret `GEMINI_MODEL`. O aplicativo recebe apenas a URL e a chave pública do Supabase. Nunca coloque chaves Gemini, `service_role` ou secret em variáveis `EXPO_PUBLIC_*`.
 
 A função valida o token com `auth.getUser`, confirma a anfitriã e reserva a geração no banco antes de chamar o Gemini. Por isso `verify_jwt = false` na configuração do gateway não representa acesso público à geração. Uma sala permite até cinco tentativas de geração; chamadas simultâneas são bloqueadas. Há uma repetição limitada para erros temporários do provedor e uma alternativa editorial explícita.
+
+A coluna `question_plan` da sala guarda o plano como lista posicional: o índice é a posição da pergunta, e um item vazio significa tema livre. A posição é preservada de ponta a ponta — `save_questions` grava as perguntas escritas à mão na posição escolhida e `publish_questions` encaixa as da IA nas lacunas restantes, em ordem.
 
 As perguntas usam o contexto fornecido e instruções para evitar spoilers. Não há ingestão automática do texto do livro nem garantia de conhecimento exato de cada capítulo; forneça um resumo do trecho e revise as perguntas.
 

@@ -18,7 +18,7 @@ export async function createRoom(input: RoomInput) {
   return rpc<string>('skoolk_create_room', {
     p_title: input.book.title, p_author: input.book.author, p_synopsis: input.book.synopsis,
     p_cover_url: input.book.cover_url, p_chapter_start: input.chapterStart, p_chapter_end: input.chapterEnd,
-    p_count: input.questionCount, p_nickname: input.nickname,
+    p_count: input.questionCount, p_nickname: input.nickname, p_plan: input.plan,
   });
 }
 export async function loadRoom(id: string): Promise<RoomSnapshot> {

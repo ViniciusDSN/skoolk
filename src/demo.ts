@@ -2,7 +2,7 @@ import type { RoomSnapshot } from './types';
 export const demoSnapshot: RoomSnapshot = {
   room: { id: 'demo', code: 'SKOOLK', host_id: 'demo-host', book_title: 'A Toca da Raposa', book_author: 'Nora Sakavic',
     synopsis: 'Neil Josten chega ao time de Exy da Universidade de Palmetto State carregando um passado que prefere esconder. Entre treinos, desconfianças e alianças improváveis, os Raposas precisam aprender a jogar — e a confiar — juntos. Até onde podemos ir para encontrar um lugar ao qual pertencer?',
-    cover_url: null, chapter_start: 1, chapter_end: 12, phase: 'lobby', current_question: 0, question_count: 3, version: 0, created_at: new Date().toISOString() },
+    cover_url: null, chapter_start: 1, chapter_end: 12, phase: 'lobby', current_question: 0, question_count: 3, version: 0, created_at: new Date().toISOString(), question_plan: [] },
   members: [
     { room_id: 'demo', user_id: 'demo-host', nickname: 'Você', avatar: 0, joined_at: '' },
     { room_id: 'demo', user_id: 'reader-1', nickname: 'Marina', avatar: 3, joined_at: '' },

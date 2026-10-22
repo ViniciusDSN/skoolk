@@ -9,7 +9,7 @@ import { ScrollArea } from '../components/ScrollArea';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useRoom } from '../hooks/useRoom';
 import { generateQuestions, loadRoom, rpc, saveQuestions } from '../lib/api';
-import { average, friendlyError, nextPhase, rankedQuestions } from '../domain';
+import { average, friendlyError, nextPhase, rankedQuestions, rotuloPlano } from '../domain';
 import { colors as c } from '../theme';
 import { Avatar, Badge, BookCover, Button, Card, ErrorMessage, Input, Stars, typography as t } from '../components/ui';
 import type { Question, QuestionDraft } from '../types';
@@ -64,19 +64,18 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
     else await rpc('skoolk_submit_feedback', { p_room: room.id, p_book: bookRating, p_discussion: discussionRating });
   });
   const trimmed = () => {
-    const filled = written(drafts);
-    if (filled.some(d => d.prompt.trim().length < 10)) throw new Error('Cada pergunta escrita precisa de pelo menos 10 caracteres.');
-    return filled.map(d => ({ ...d, prompt: d.prompt.trim() }));
+    if (written(drafts).some(d => d.prompt.trim().length < 10)) throw new Error('Cada pergunta escrita precisa de pelo menos 10 caracteres.');
+    return drafts.map(d => ({ ...d, prompt: d.prompt.trim() }));
   };
   const persistQuestions = () => void act(async () => {
-    const filled = trimmed();
-    if (!filled.length) throw new Error('Escreva ao menos uma pergunta ou gere as restantes com a IA.');
-    await saveQuestions(room.id, filled);
+    const todas = trimmed();
+    if (!todas.some(d => d.prompt.length)) throw new Error('Escreva ao menos uma pergunta ou gere as restantes com a IA.');
+    await saveQuestions(room.id, todas);
     setQuestionsOpen(false);
   });
   const fillWithAI = () => void act(async () => {
-    const filled = trimmed();
-    if (filled.length) await saveQuestions(room.id, filled);
+    const todas = trimmed();
+    if (todas.some(d => d.prompt.length)) await saveQuestions(room.id, todas);
     await generateQuestions(room.id);
     const fresh = await loadRoom(room.id);
     setSnapshot(fresh);
@@ -108,6 +107,13 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
           </Card>
           {host && <Card style={{ gap: 14 }}><Text style={t.eyebrow}>ESCOLHA UMA DINÂMICA</Text><View style={s.row}><View style={s.iconTile}><MessageCircle size={23} color={c.purple} /></View><View style={{ flex: 1, gap: 4 }}><Text style={t.section}>Entre perguntas e páginas</Text><Text style={[t.subtitle, { fontSize: 12 }]}>{room.question_count} perguntas para abrir a conversa</Text></View></View>
             {data.questions.length > 0 && <View style={s.row}><Check size={16} color={c.success} /><Text style={{ color: c.success, fontSize: 12 }}>{data.questions.length} de {room.question_count} perguntas prontas</Text></View>}
+            {room.question_plan.some(p => rotuloPlano(p)) && <View style={{ gap: 9, borderTopWidth: 1, borderColor: c.line, paddingTop: 14 }}>
+              <Text style={t.eyebrow}>SEU PLANO</Text>
+              {Array.from({ length: room.question_count }, (_, i) => rotuloPlano(room.question_plan[i])).map((rotulo, i) => <View key={i} style={s.row}>
+                <View style={[s.planNum, { backgroundColor: rotulo ? c.lilac : '#F4F1F8' }]}><Text style={{ color: rotulo ? c.purple : c.muted, fontSize: 10, fontWeight: '700' }}>{i + 1}</Text></View>
+                <Text style={{ color: rotulo ? c.ink : c.muted, fontSize: 13 }}>{rotulo ?? 'A IA escolhe'}</Text>
+              </View>)}
+            </View>}
             <Text style={[t.subtitle, { fontSize: 11, textAlign: 'center' }]}>A conversa é de vocês. A primeira pergunta, por nossa conta.</Text>
             <Button title={data.questions.length ? 'Revisar e completar perguntas' : 'Preparar as perguntas'} secondary disabled={busy} onPress={openQuestions} />
           </Card>}
@@ -143,7 +149,7 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
     <Modal visible={questionsOpen} transparent animationType="slide" onRequestClose={() => setQuestionsOpen(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><Card style={{ width: '100%', maxWidth: 400, maxHeight: '90%', padding: 20 }}><View style={s.between}><Text style={[t.section, { flex: 1 }]}>A conversa começa com você</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar perguntas" onPress={() => setQuestionsOpen(false)} style={{ padding: 8 }}><X size={20} color={c.muted} /></Pressable></View><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 18 }}>
       <Text style={t.subtitle}>Escreva as que quiser e deixe o resto com a IA. {filled} de {room.question_count} prontas.</Text>
       {drafts.map((draft, index) => <View key={index} style={{ gap: 8 }}>
-        <View style={s.between}><Text style={s.draftLabel}>Pergunta {index + 1}</Text>{draft.prompt.trim().length > 0 && <Badge>{draft.source === 'ia' ? 'DA IA' : 'SUA'}</Badge>}</View>
+        <View style={s.between}><Text style={s.draftLabel}>Pergunta {index + 1}</Text><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexShrink: 1 }}>{rotuloPlano(room.question_plan[index]) && <Badge>{rotuloPlano(room.question_plan[index])}</Badge>}{draft.prompt.trim().length > 0 && <Badge>{draft.source === 'ia' ? 'DA IA' : 'SUA'}</Badge>}</View></View>
         <Input multiline maxLength={600} value={draft.prompt} placeholder="O que vocês gostariam de conversar?" onChangeText={value => setDrafts(previous => previous.map((item, i) => i === index ? { ...item, prompt: value, source: 'manual' } : item))} />
       </View>)}
     </ScrollArea><ErrorMessage message={error} /><Button title="Preparar estas perguntas" busy={busy} onPress={persistQuestions} />{filled < room.question_count && <Button secondary title={'Gerar as ' + (room.question_count - filled) + ' restantes com IA'} busy={busy} onPress={fillWithAI} icon={<Sparkles size={17} color={c.purple} />} />}</Card></View></Modal>
@@ -178,5 +184,6 @@ const s = StyleSheet.create({
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, paddingTop: 6 }, progressDot: { height: 5, width: 5, backgroundColor: '#B398D5', borderRadius: 10 },
   finishHero: { gap: 15, alignItems: 'center', paddingVertical: 15 }, finishIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF18', alignItems: 'center', justifyContent: 'center' },
   draftLabel: { color: c.ink, fontWeight: '600', fontSize: 12 },
+  planNum: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   overlay: { flex: 1, backgroundColor: '#241630AA', justifyContent: 'center', alignItems: 'center', padding: 24 },
 });

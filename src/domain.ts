@@ -1,4 +1,18 @@
-import type { Phase, Question, Rating } from './types';
+import type { Phase, Question, QuestionMoment, QuestionPlanItem, QuestionTopic, Rating } from './types';
+
+export const TOPICOS: { id: QuestionTopic; nome: string }[] = [
+  { id: 'personagens', nome: 'Personagens' }, { id: 'enredo', nome: 'Enredo' }, { id: 'temas', nome: 'Temas' },
+  { id: 'ambientacao', nome: 'Ambientação' }, { id: 'narrativa', nome: 'Narrativa' }, { id: 'leitor', nome: 'Você leitor' },
+];
+export const MOMENTOS: { id: QuestionMoment; nome: string }[] = [
+  { id: 'comeco', nome: 'Começo' }, { id: 'meio', nome: 'Meio' }, { id: 'desfecho', nome: 'Desfecho' }, { id: 'todo', nome: 'Tudo' },
+];
+export function rotuloPlano(item: Partial<QuestionPlanItem> | undefined | null): string | null {
+  const topico = TOPICOS.find(x => x.id === item?.topico);
+  if (!topico) return null;
+  const momento = MOMENTOS.find(x => x.id === item?.momento) ?? MOMENTOS[3];
+  return `${topico.nome} · ${momento.nome}`;
+}
 
 export const normalizeCode = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 export function validateJoin(code: string, nickname: string): string | null {

@@ -5,7 +5,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ArrowRight, BookOpen, Check, ChevronRight, Crown, Heart, LogOut, Plus, Sparkles, X } from 'lucide-react-native';
+import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, Heart, LogOut, Plus, Sparkles, X } from 'lucide-react-native';
 import type { Session } from '@supabase/supabase-js';
 import { Avatar, Back, Badge, BookCover, Button, Card, ErrorMessage, Input, typography as t } from './src/components/ui';
 import { colors as c, avatarColors } from './src/theme';
@@ -13,14 +13,15 @@ import { avatarIcons } from './src/components/avatars';
 import { useKeyboardHeight } from './src/hooks/useKeyboardHeight';
 import { configured, db, supabase } from './src/lib/supabase';
 import { createRoom, ensureReader, listBooks, rpc } from './src/lib/api';
-import { friendlyError, normalizeCode, validateChapters, validateJoin } from './src/domain';
+import { MOMENTOS, TOPICOS, friendlyError, normalizeCode, rotuloPlano, validateChapters, validateJoin } from './src/domain';
 import { ScrollArea } from './src/components/ScrollArea';
 import { RoomScreen } from './src/screens/RoomScreen';
-import type { Book, Room } from './src/types';
+import type { Book, QuestionMoment, QuestionPlanItem, QuestionTopic, Room } from './src/types';
 
 type Screen = 'home' | 'auth' | 'host' | 'create' | 'room';
 const initialBook: Book = { id: 'starter', title: 'A Toca da Raposa', author: 'Nora Sakavic', synopsis: 'Neil Josten se junta aos Raposas, o time de Exy da Universidade de Palmetto State. Entre segredos e alianças improváveis, o grupo enfrenta os desafios de confiar e pertencer. Discuta apenas os acontecimentos dos capítulos selecionados.', cover_url: null };
 const emptyBook: Book = { id: '', title: '', author: '', synopsis: '', cover_url: null };
+const rotuloSlot = (item: QuestionPlanItem | null) => rotuloPlano(item) ?? 'A IA escolhe';
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home'), [session, setSession] = useState<Session | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null), [demo, setDemo] = useState(false);
@@ -30,6 +31,11 @@ export default function App() {
   const [books, setBooks] = useState<Book[]>([]), [rooms, setRooms] = useState<Room[]>([]);
   const [book, setBook] = useState<Book>(initialBook), [start, setStart] = useState('1'), [end, setEnd] = useState('12'), [count, setCount] = useState(6);
   const [bookModal, setBookModal] = useState(false), [bookDraft, setBookDraft] = useState<Book>(emptyBook);
+  const [plan, setPlan] = useState<(QuestionPlanItem | null)[]>(() => Array.from({ length: 6 }, () => null));
+  const [openSlot, setOpenSlot] = useState<number | null>(null);
+  const resizePlan = (n: number) => { setCount(n); setOpenSlot(null); setPlan(previous => Array.from({ length: n }, (_, i) => previous[i] ?? null)); };
+  const setTopico = (i: number, topico: QuestionTopic) => setPlan(previous => previous.map((item, j) => j !== i ? item : item?.topico === topico ? null : { topico, momento: item?.momento ?? 'todo' }));
+  const setMomento = (i: number, momento: QuestionMoment) => setPlan(previous => previous.map((item, j) => j !== i || !item ? item : { ...item, momento }));
   const isHost = !!session && !session.user.is_anonymous;
   const navigate = (next: Screen) => { setScreen(next); setError(null); setNotice(null); };
   const run = async (action: () => Promise<void>) => {
@@ -89,7 +95,9 @@ export default function App() {
   const create = () => void run(async () => {
     const message = validateChapters(Number(start), Number(end)); if (message) throw new Error(message);
     if (name.trim().length < 2 || name.trim().length > 24) throw new Error('Escolha seu nome de anfitriã, entre 2 e 24 caracteres.');
-    await enterRoom(await createRoom({ book, chapterStart: Number(start), chapterEnd: Number(end), questionCount: count, nickname: name.trim() }));
+    const ultimo = plan.reduce((acc, item, i) => item ? i : acc, -1);
+    const planoEnviado: Partial<QuestionPlanItem>[] = plan.slice(0, ultimo + 1).map(item => item ?? {});
+    await enterRoom(await createRoom({ book, chapterStart: Number(start), chapterEnd: Number(end), questionCount: count, nickname: name.trim(), plan: planoEnviado }));
   });
   const addBook = () => { setBookDraft(emptyBook); setError(null); setBookModal(true); };
   const keyboard = useKeyboardHeight();
@@ -136,7 +144,24 @@ export default function App() {
         <View style={s.nav}><Back onPress={() => navigate('host')} /><Text style={s.navTitle}>Novo encontro</Text><Badge>01 / 01</Badge></View>
         <View style={[s.content, { gap: 23 }]}><View style={{ gap: 8 }}><Text style={t.title}>Qual é a leitura{'\n'}da vez?</Text><Text style={t.subtitle}>Escolha o livro. A gente ajuda com a conversa.</Text></View>
           <Card><Text style={t.eyebrow}>LIVRO DO ENCONTRO</Text>{[...books, ...(books.some(b => b.id === book.id) ? [] : [book])].map(b => <Pressable accessibilityRole="radio" accessibilityState={{ checked: b.id === book.id }} key={b.id} onPress={() => setBook(b)} style={[s.bookSelect, b.id === book.id && { borderColor: c.purple, backgroundColor: '#FAF7FF' }]}><BookCover title={b.title} uri={b.cover_url} small /><View style={{ flex: 1, gap: 5 }}><Text style={{ color: c.ink, fontSize: 14, fontWeight: '600' }}>{b.title}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{b.author}</Text></View><View style={[s.radio, b.id === book.id && { borderColor: c.purple, backgroundColor: c.purple }]}>{b.id === book.id && <Check color="#fff" size={12} />}</View></Pressable>)}<Button title="Adicionar outro livro" secondary icon={<Plus size={17} color={c.purple} />} onPress={addBook} /></Card>
-          <Card><View style={{ gap: 6 }}><Text style={t.section}>Até onde vamos conversar?</Text><Text style={[t.subtitle, { fontSize: 12 }]}>As perguntas respeitam o trecho da leitura.</Text></View><View style={s.row}><View style={{ flex: 1 }}><Input label="Do capítulo" value={start} onChangeText={setStart} keyboardType="number-pad" maxLength={4} /></View><Text style={{ color: c.muted, marginTop: 22 }}>—</Text><View style={{ flex: 1 }}><Input label="Até o capítulo" value={end} onChangeText={setEnd} keyboardType="number-pad" maxLength={4} /></View></View><Text style={t.section}>Quantas perguntas?</Text><View style={{ flexDirection: 'row', gap: 10 }}>{[3, 6, 9, 12].map(n => <Pressable key={n} accessibilityRole="radio" accessibilityLabel={`${n} perguntas`} accessibilityState={{ checked: n === count }} onPress={() => setCount(n)} style={[s.count, n === count && { backgroundColor: c.purple, borderColor: c.purple }]}><Text style={{ color: count === n ? '#fff' : c.muted, fontSize: 15, fontWeight: '600' }}>{n}</Text></Pressable>)}</View><Input label="Seu nome de anfitriã" placeholder="Como o clube te chama?" value={name} onChangeText={setName} maxLength={24} /></Card>
+          <Card><View style={{ gap: 6 }}><Text style={t.section}>Até onde vamos conversar?</Text><Text style={[t.subtitle, { fontSize: 12 }]}>As perguntas respeitam o trecho da leitura.</Text></View><View style={s.row}><View style={{ flex: 1 }}><Input label="Do capítulo" value={start} onChangeText={setStart} keyboardType="number-pad" maxLength={4} /></View><Text style={{ color: c.muted, marginTop: 22 }}>—</Text><View style={{ flex: 1 }}><Input label="Até o capítulo" value={end} onChangeText={setEnd} keyboardType="number-pad" maxLength={4} /></View></View><Text style={t.section}>Quantas perguntas?</Text><View style={{ flexDirection: 'row', gap: 10 }}>{[3, 6, 9, 12].map(n => <Pressable key={n} accessibilityRole="radio" accessibilityLabel={`${n} perguntas`} accessibilityState={{ checked: n === count }} onPress={() => resizePlan(n)} style={[s.count, n === count && { backgroundColor: c.purple, borderColor: c.purple }]}><Text style={{ color: count === n ? '#fff' : c.muted, fontSize: 15, fontWeight: '600' }}>{n}</Text></Pressable>)}</View><Input label="Seu nome de anfitriã" placeholder="Como o clube te chama?" value={name} onChangeText={setName} maxLength={24} /></Card>
+          <Card style={{ gap: 13 }}><View style={{ gap: 6 }}><Text style={t.eyebrow}>PLANO DAS PERGUNTAS</Text><Text style={[t.subtitle, { fontSize: 12 }]}>Toque numa pergunta para escolher sobre o que ela fala. As que ficarem em branco são por conta da IA.</Text></View>
+            {plan.map((item, i) => openSlot === i
+              ? <View key={i} style={s.planOpen}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Fechar pergunta ${i + 1}`} onPress={() => setOpenSlot(null)} style={s.planHead}>
+                    <View style={[s.planNum, { backgroundColor: c.purple }]}><Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{i + 1}</Text></View>
+                    <Text style={{ flex: 1, color: c.ink, fontSize: 13, fontWeight: '600' }}>Pergunta {i + 1}</Text><ChevronUp size={17} color={c.purple} />
+                  </Pressable>
+                  <Text style={s.planLabel}>SOBRE O QUÊ</Text>
+                  <View style={s.chipWrap}>{TOPICOS.map(tp => <Pressable key={tp.id} accessibilityRole="radio" accessibilityState={{ checked: item?.topico === tp.id }} onPress={() => setTopico(i, tp.id)} style={[s.chip, item?.topico === tp.id && s.chipOn]}><Text style={[s.chipText, item?.topico === tp.id && s.chipTextOn]}>{tp.nome}</Text></Pressable>)}</View>
+                  <Text style={s.planLabel}>EM QUE MOMENTO</Text>
+                  <View style={s.chipWrap}>{MOMENTOS.map(mo => <Pressable key={mo.id} disabled={!item} accessibilityRole="radio" accessibilityState={{ checked: item?.momento === mo.id, disabled: !item }} onPress={() => setMomento(i, mo.id)} style={[s.chip, item?.momento === mo.id && s.chipOn, !item && { opacity: .45 }]}><Text style={[s.chipText, item?.momento === mo.id && s.chipTextOn]}>{mo.nome}</Text></Pressable>)}</View>
+                </View>
+              : <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Pergunta ${i + 1}: ${rotuloSlot(item)}`} onPress={() => setOpenSlot(i)} style={s.planRow}>
+                  <View style={[s.planNum, { backgroundColor: item ? c.lilac : '#F4F1F8' }]}><Text style={{ color: item ? c.purple : c.muted, fontSize: 12, fontWeight: '700' }}>{i + 1}</Text></View>
+                  <Text style={{ flex: 1, color: item ? c.ink : c.muted, fontSize: 13 }}>{rotuloSlot(item)}</Text><ChevronDown size={17} color={c.purple} />
+                </Pressable>)}
+          </Card>
           <ErrorMessage message={error} /><Button title="Criar sala e receber código" onPress={create} busy={busy} icon={<ArrowRight size={18} color="#fff" />} /><Text style={[t.subtitle, { fontSize: 11, textAlign: 'center' }]}>Você decide quando começar e quando seguir em frente.</Text>
         </View>
       </>}
@@ -155,5 +180,13 @@ const s = StyleSheet.create({
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 15, marginBottom: 12 }, navBrand: { fontSize: 27, fontWeight: '800', color: c.purple, letterSpacing: -1.5 }, navTitle: { color: c.ink, fontSize: 15, fontWeight: '600' },
   largeIcon: { backgroundColor: c.lilac, width: 64, height: 64, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }, centerButton: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 5 },
   hostHero: { borderRadius: 24, padding: 24, gap: 22 }, bookSelect: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 12, borderWidth: 1, borderColor: c.line, borderRadius: 14 }, radio: { width: 19, height: 19, borderRadius: 10, borderWidth: 1.5, borderColor: c.line, alignItems: 'center', justifyContent: 'center' }, count: { flex: 1, height: 45, borderRadius: 12, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center' },
+  planOpen: { borderWidth: 1, borderColor: c.purple, backgroundColor: '#FAF7FF', borderRadius: 16, padding: 14, gap: 11 },
+  planHead: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 32 },
+  planRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderWidth: 1, borderColor: c.line, borderRadius: 16, minHeight: 50 },
+  planNum: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  planLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.4, color: '#7D7193' },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { borderWidth: 1, borderColor: c.line, backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  chipOn: { borderColor: c.purple, backgroundColor: c.purple }, chipText: { color: '#5C5370', fontSize: 12 }, chipTextOn: { color: '#fff', fontWeight: '600' },
   overlay: { flex: 1, backgroundColor: '#241630AA', justifyContent: 'flex-end', alignItems: 'center' }, sheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxWidth: 480, width: '100%', maxHeight: '92%' },
 });
