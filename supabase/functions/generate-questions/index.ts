@@ -1,10 +1,69 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
+import JSZip from 'npm:jszip@3.10.1';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const MAX_BOOK_SIZE = 50 * 1024 * 1024;
+const MAX_EPUB_TEXT_CHARS = 4_000_000;
 
 type GeminiFile = { name: string; uri: string; mimeType: string; state?: string };
+
+const attribute = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i'))?.[2];
+const zipPath = (base: string, href: string) => {
+  const parts = `${base}/${href.split('#')[0].split('?')[0]}`.split('/');
+  const normalized: string[] = [];
+  for (const part of parts) { if (part && part !== '.') { if (part === '..') normalized.pop(); else normalized.push(part); } }
+  return normalized.join('/');
+};
+const epubText = (html: string) => html
+  .replace(/<!--[\s\S]*?-->/g, '')
+  .replace(/<(script|style|svg|noscript)[^>]*>[\s\S]*?<\/\1>/gi, '')
+  .replace(/<br\s*\/?>/gi, '\n')
+  .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|section|article)>/gi, '\n')
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/&(nbsp|#160);/gi, ' ')
+  .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
+  .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+  .replace(/&#(\d+);/g, (_, decimal) => String.fromCodePoint(parseInt(decimal, 10)))
+  .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+
+async function prepareBookForGemini(file: Blob, name: string, mimeType: string) {
+  const isEpub = mimeType.toLowerCase() === 'application/epub+zip' || /\.epub$/i.test(name);
+  if (!isEpub) return { file, name, mimeType };
+  let zip: Awaited<ReturnType<typeof JSZip.loadAsync>>;
+  try { zip = await JSZip.loadAsync(await file.arrayBuffer()); }
+  catch { throw new Error('Não foi possível abrir este EPUB. Verifique se o arquivo não tem proteção DRM ou envie uma versão sem proteção.'); }
+  const entries = Object.values(zip.files).filter(entry => !entry.dir && /\.(xhtml?|html)$/i.test(entry.name));
+  if (!entries.length || entries.length > 2000) throw new Error('Este EPUB não contém capítulos que possam ser lidos.');
+  const opf = Object.values(zip.files).find(entry => !entry.dir && /\.opf$/i.test(entry.name));
+  let chapters = entries;
+  if (opf) {
+    const packageText = await opf.async('text');
+    const manifest = new Map<string, string>();
+    for (const match of packageText.matchAll(/<item\b[^>]*>/gi)) {
+      const id = attribute(match[0], 'id'), href = attribute(match[0], 'href');
+      if (id && href) manifest.set(id, zipPath(opf.name.slice(0, opf.name.lastIndexOf('/')), href));
+    }
+    const ordered = Array.from(packageText.matchAll(/<itemref\b[^>]*>/gi))
+      .map(match => attribute(match[0], 'idref')).filter((id): id is string => !!id)
+      .map(id => manifest.get(id)).filter((path): path is string => !!path)
+      .map(path => zip.file(path)).filter((entry): entry is NonNullable<typeof entry> => !!entry);
+    if (ordered.length) chapters = ordered;
+  }
+  let remaining = MAX_EPUB_TEXT_CHARS;
+  const parts: string[] = [];
+  for (const chapter of chapters) {
+    if (remaining <= 0) break;
+    const text = epubText(await chapter.async('text'));
+    if (!text) continue;
+    const clipped = text.slice(0, remaining);
+    parts.push(clipped);
+    remaining -= clipped.length;
+  }
+  const text = parts.join('\n\n');
+  if (text.length < 100) throw new Error('Não foi possível extrair texto deste EPUB. Envie um EPUB sem proteção DRM ou um PDF.');
+  return { file: new Blob([text], { type: 'text/plain;charset=utf-8' }), name: name.replace(/\.epub$/i, '') + '.txt', mimeType: 'text/plain' };
+}
 
 async function uploadBookToGemini(file: Blob, name: string, mimeType: string, key: string): Promise<GeminiFile> {
   if (!file.size || file.size > MAX_BOOK_SIZE) throw new Error('O arquivo do livro precisa ter até 50 MB.');
@@ -94,7 +153,8 @@ Deno.serve(async request => {
       ? `Siga exatamente esta lista, uma pergunta por item e nesta ordem: ${pedidos}. No campo category de cada pergunta, escreva o tópico pedido com inicial maiúscula.`
       : 'Varie entre Personagens, Conexões, Entrelinhas e Narrativa.';
 
-    const geminiFile = await uploadBookToGemini(bookFile, room.book_file_name, room.book_file_mime, key);
+    const sourceBook = await prepareBookForGemini(bookFile, room.book_file_name, room.book_file_mime);
+    const geminiFile = await uploadBookToGemini(sourceBook.file, sourceBook.name, sourceBook.mimeType, key);
     geminiFileName = geminiFile.name;
     const fetchOptions = {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },

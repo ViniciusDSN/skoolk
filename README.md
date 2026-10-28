@@ -41,7 +41,7 @@ A função valida o token com `auth.getUser`, confirma a anfitriã e reserva a g
 
 A coluna `question_plan` da sala guarda o plano como lista posicional: o índice é a posição da pergunta, e um item vazio significa tema livre. A posição é preservada de ponta a ponta — `save_questions` grava as perguntas escritas à mão na posição escolhida e `publish_questions` encaixa as da IA nas lacunas restantes, em ordem.
 
-As perguntas usam o arquivo enviado como fonte principal, o contexto opcional e instruções para evitar spoilers. O Gemini aceita o envio de qualquer formato pelo seletor, mas a qualidade de leitura depende de o formato ser compatível com o modelo — PDFs normalmente preservam melhor a estrutura. Revise as perguntas antes de iniciar a conversa.
+As perguntas usam o arquivo enviado como fonte principal, o contexto opcional e instruções para evitar spoilers. EPUBs são extraídos localmente na função e enviados como texto para o Gemini; outros formatos dependem de compatibilidade do modelo. PDFs normalmente preservam melhor a estrutura. Revise as perguntas antes de iniciar a conversa.
 
 Para reproduzir o backend em outro projeto, autentique o Supabase CLI, vincule o projeto, aplique os arquivos em `supabase/migrations`, habilite o login anônimo em Authentication e publique `generate-questions` com os secrets descritos em `supabase/functions/.env.example`. Configure também as URLs de confirmação de e-mail para seu ambiente. O arquivo `supabase/config.toml` configura o ambiente local; não altera sozinho as configurações de Auth hospedadas.
 
