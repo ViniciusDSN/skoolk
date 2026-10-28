@@ -29,7 +29,7 @@ O app restaura a sessão e o último encontro no mesmo dispositivo. Sair da tela
 
 ## Supabase e IA
 
-O projeto `xsvrgnqgkiorwiluwvvw` está configurado com login anônimo, seis migrações aplicadas, Realtime e a Edge Function `generate-questions`. O servidor MCP foi adicionado e autenticado via OAuth.
+O projeto `Skoolk` está configurado com login anônimo, seis migrações aplicadas, Realtime e a Edge Function `generate-questions`. O servidor MCP foi adicionado e autenticado via OAuth.
 
 O cadastro de anfitriãs depende da entrega do e-mail de confirmação. Não foi configurado SMTP próprio nesta entrega: o [serviço padrão do Supabase](https://supabase.com/docs/guides/auth/auth-smtp) limita o projeto a dois e-mails por hora e só envia para endereços da equipe. Configure SMTP próprio antes de abrir cadastros para outros endereços. Os testes automatizados criam contas isoladas já confirmadas pela API administrativa; não validam a entrega de e-mails. A entrada anônima dos leitores não envia e-mail.
 
