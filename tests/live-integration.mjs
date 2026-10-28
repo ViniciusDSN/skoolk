@@ -9,15 +9,19 @@ const url=process.env.EXPO_PUBLIC_SUPABASE_URL, key=process.env.EXPO_PUBLIC_SUPA
 const admin=createClient(url,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 const client=()=>createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
 const host=client(),reader=client(),outsider=client();
-const ids=[];let channel;
+const ids=[];let channel,bookPath;
+const bookText='Neil se junta aos Raposas e aprende a confiar no grupo.';
 const check=(r)=>{if(r.error)throw new Error(r.error.message);return r.data;};
 try {
  const email=`skoolk-test-${randomUUID()}@example.invalid`,password=randomUUID()+randomUUID();
  const created=check(await admin.auth.admin.createUser({email,password,email_confirm:true}));ids.push(created.user.id);
  check(await host.auth.signInWithPassword({email,password}));
+ bookPath=`${created.user.id}/integration-${randomUUID()}.txt`;
+ const bookFile=new Blob([bookText],{type:'text/plain'});
+ check(await host.storage.from('skoolk-books').upload(bookPath,bookFile,{contentType:'text/plain'}));
  ids.push(check(await reader.auth.signInAnonymously()).user.id);
  ids.push(check(await outsider.auth.signInAnonymously()).user.id);
- const roomId=check(await host.rpc('skoolk_create_room',{p_title:'A Toca da Raposa',p_author:'Nora Sakavic',p_synopsis:'Um grupo de jovens atletas, os Raposas, aprende a confiar uns nos outros. Neil é um recém-chegado reservado. Explore temas de pertencimento e confiança sem presumir acontecimentos específicos.',p_cover_url:null,p_chapter_start:1,p_chapter_end:3,p_count:3,p_nickname:'Teste Anfitriã'}));
+ const roomId=check(await host.rpc('skoolk_create_room',{p_title:'A Toca da Raposa',p_author:'Nora Sakavic',p_synopsis:'Um grupo de jovens atletas, os Raposas, aprende a confiar uns nos outros. Neil é um recém-chegado reservado. Explore temas de pertencimento e confiança sem presumir acontecimentos específicos.',p_cover_url:null,p_file_path:bookPath,p_file_name:'livro-de-teste.txt',p_file_mime:'text/plain',p_file_size:bookFile.size,p_chapter_start:1,p_chapter_end:3,p_count:3,p_nickname:'Teste Anfitriã'}));
  const room=check(await host.from('skoolk_rooms').select('*').eq('id',roomId).single());
  assert.equal(check(await outsider.from('skoolk_rooms').select('*').eq('id',roomId)).length,0);
  assert.equal(check(await reader.rpc('skoolk_join_room',{p_code:room.code,p_nickname:'Teste Leitor',p_avatar:1})),roomId);
@@ -62,6 +66,7 @@ try {
  console.log('PASS: full discussion/rating lifecycle, duplicate protection, final feedback and room isolation.');
 } finally {
  if(channel)await reader.removeChannel(channel);
+ if(bookPath)await admin.storage.from('skoolk-books').remove([bookPath]);
  await Promise.all([host.auth.signOut(),reader.auth.signOut(),outsider.auth.signOut()]);
  for(const id of ids)check(await admin.auth.admin.deleteUser(id));
  console.log(`Cleanup: removed ${ids.length} isolated test users and their room data.`);

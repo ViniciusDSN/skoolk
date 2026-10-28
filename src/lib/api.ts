@@ -19,6 +19,8 @@ export async function createRoom(input: RoomInput) {
     p_title: input.book.title, p_author: input.book.author, p_synopsis: input.book.synopsis,
     p_cover_url: input.book.cover_url, p_chapter_start: input.chapterStart, p_chapter_end: input.chapterEnd,
     p_count: input.questionCount, p_nickname: input.nickname, p_plan: input.plan,
+    p_file_path: input.book.file_path ?? null, p_file_name: input.book.file_name ?? null,
+    p_file_mime: input.book.file_mime ?? null, p_file_size: input.book.file_size ?? null,
   });
 }
 export async function loadRoom(id: string): Promise<RoomSnapshot> {

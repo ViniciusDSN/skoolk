@@ -1,8 +1,12 @@
 export type Phase = 'lobby' | 'discussion' | 'rating' | 'finished';
-export type Book = { id: string; title: string; author: string; synopsis: string; cover_url: string | null; owner_id?: string };
+export type Book = {
+  id: string; title: string; author: string; synopsis: string; cover_url: string | null; owner_id?: string;
+  file_path?: string | null; file_name?: string | null; file_mime?: string | null; file_size?: number | null;
+};
 export type Room = {
   id: string; code: string; host_id: string; book_title: string; book_author: string;
-  synopsis: string; cover_url: string | null; chapter_start: number; chapter_end: number;
+  synopsis: string; cover_url: string | null; book_file_path?: string | null; book_file_name?: string | null;
+  book_file_mime?: string | null; book_file_size?: number | null; chapter_start: number; chapter_end: number;
   phase: Phase; current_question: number; question_count: number; version: number;
   created_at: string; generation_token?: string | null; question_plan: QuestionPlanItem[];
 };

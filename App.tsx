@@ -4,8 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
+import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, Heart, LogOut, Plus, Sparkles, X } from 'lucide-react-native';
+import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, FileText, Heart, LogOut, Plus, Sparkles, Upload, X } from 'lucide-react-native';
 import type { Session } from '@supabase/supabase-js';
 import { Avatar, Back, Badge, BookCover, Button, Card, ErrorMessage, Input, typography as t } from './src/components/ui';
 import { colors as c, avatarColors } from './src/theme';
@@ -22,6 +23,9 @@ type Screen = 'home' | 'auth' | 'host' | 'create' | 'room';
 const initialBook: Book = { id: 'starter', title: 'A Toca da Raposa', author: 'Nora Sakavic', synopsis: 'Neil Josten se junta aos Raposas, o time de Exy da Universidade de Palmetto State. Entre segredos e alianças improváveis, o grupo enfrenta os desafios de confiar e pertencer. Discuta apenas os acontecimentos dos capítulos selecionados.', cover_url: null };
 const emptyBook: Book = { id: '', title: '', author: '', synopsis: '', cover_url: null };
 const rotuloSlot = (item: QuestionPlanItem | null) => rotuloPlano(item) ?? 'A IA escolhe';
+const MAX_BOOK_SIZE = 50 * 1024 * 1024;
+const displaySize = (bytes?: number) => bytes ? `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB` : '';
+const fileExtension = (name: string) => name.match(/(\.[a-z0-9]{1,12})$/i)?.[1].toLowerCase() ?? '';
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home'), [session, setSession] = useState<Session | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null), [demo, setDemo] = useState(false);
@@ -31,6 +35,7 @@ export default function App() {
   const [books, setBooks] = useState<Book[]>([]), [rooms, setRooms] = useState<Room[]>([]);
   const [book, setBook] = useState<Book>(initialBook), [start, setStart] = useState('1'), [end, setEnd] = useState('12'), [count, setCount] = useState(6);
   const [bookModal, setBookModal] = useState(false), [bookDraft, setBookDraft] = useState<Book>(emptyBook);
+  const [bookFile, setBookFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [plan, setPlan] = useState<(QuestionPlanItem | null)[]>(() => Array.from({ length: 6 }, () => null));
   const [openSlot, setOpenSlot] = useState<number | null>(null);
   const resizePlan = (n: number) => { setCount(n); setOpenSlot(null); setPlan(previous => Array.from({ length: n }, (_, i) => previous[i] ?? null)); };
@@ -88,18 +93,41 @@ export default function App() {
   });
   const saveBook = () => void run(async () => {
     if (!bookDraft.title.trim() || !bookDraft.author.trim()) throw new Error('Preencha o título e a autoria do livro.');
+    if (!bookFile) throw new Error('Envie o arquivo do livro para que a IA possa preparar as perguntas.');
+    if (bookFile.size && bookFile.size > MAX_BOOK_SIZE) throw new Error('O arquivo do livro pode ter até 50 MB.');
     if (bookDraft.cover_url && !/^https:\/\//.test(bookDraft.cover_url)) throw new Error('A imagem da capa deve usar um endereço HTTPS.');
-    const { data, error } = await db().from('skoolk_books').insert({ owner_id: session!.user.id, title: bookDraft.title.trim(), author: bookDraft.author.trim(), synopsis: bookDraft.synopsis.trim(), cover_url: bookDraft.cover_url || null }).select().single();
-    if (error) throw error; setBooks([data, ...books]); setBook(data); setBookModal(false);
+    const mime = bookFile.mimeType || 'application/octet-stream';
+    const path = `${session!.user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}${fileExtension(bookFile.name)}`;
+    const body = bookFile.file ?? await (await fetch(bookFile.uri)).blob();
+    const size = bookFile.size ?? body.size;
+    if (!size || size > MAX_BOOK_SIZE) throw new Error('O arquivo do livro pode ter até 50 MB.');
+    const { error: uploadError } = await db().storage.from('skoolk-books').upload(path, body, { contentType: mime, upsert: false });
+    if (uploadError) throw uploadError;
+    const { data, error: insertError } = await db().from('skoolk_books').insert({
+      owner_id: session!.user.id, title: bookDraft.title.trim(), author: bookDraft.author.trim(), synopsis: bookDraft.synopsis.trim(), cover_url: bookDraft.cover_url || null,
+      file_path: path, file_name: bookFile.name, file_mime: mime, file_size: size,
+    }).select().single();
+    if (insertError) { await db().storage.from('skoolk-books').remove([path]); throw insertError; }
+    setBooks([data, ...books]); setBook(data); setBookFile(null); setBookModal(false);
   });
   const create = () => void run(async () => {
     const message = validateChapters(Number(start), Number(end)); if (message) throw new Error(message);
     if (name.trim().length < 2 || name.trim().length > 24) throw new Error('Escolha seu nome de anfitriã, entre 2 e 24 caracteres.');
+    if (!book.file_path) throw new Error('Escolha um livro com o arquivo enviado. É ele que orienta as perguntas da IA.');
     const ultimo = plan.reduce((acc, item, i) => item ? i : acc, -1);
     const planoEnviado: Partial<QuestionPlanItem>[] = plan.slice(0, ultimo + 1).map(item => item ?? {});
     await enterRoom(await createRoom({ book, chapterStart: Number(start), chapterEnd: Number(end), questionCount: count, nickname: name.trim(), plan: planoEnviado }));
   });
-  const addBook = () => { setBookDraft(emptyBook); setError(null); setBookModal(true); };
+  const addBook = () => { setBookDraft(emptyBook); setBookFile(null); setError(null); setBookModal(true); };
+  const pickBookFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+      if (result.canceled) return;
+      const picked = result.assets[0];
+      if (picked.size && picked.size > MAX_BOOK_SIZE) throw new Error('O arquivo do livro pode ter até 50 MB.');
+      setBookFile(picked); setError(null);
+    } catch (e) { setError(friendlyError(e)); }
+  };
   const keyboard = useKeyboardHeight();
   const lightStatus = screen === 'home' || screen === 'room';
   return <SafeAreaProvider><View style={s.outer}><SafeAreaView style={[s.app, { backgroundColor: lightStatus ? c.purple : c.background }]} edges={['top', 'bottom']}>
@@ -167,7 +195,7 @@ export default function App() {
       </>}
       </ScrollArea>
     </View>}
-    <Modal visible={bookModal} transparent animationType="slide" onRequestClose={() => setBookModal(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><View style={s.sheet}><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, gap: 20 }}><View style={s.between}><Text style={t.section}>Mais uma história na estante</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBookModal(false)} style={s.centerButton}><X color={c.muted} size={20} /></Pressable></View><Input label="Título do livro" placeholder="Uma nova leitura" value={bookDraft.title} onChangeText={title => setBookDraft({ ...bookDraft, title })} maxLength={160} /><Input label="Autoria" placeholder="Quem escreveu?" value={bookDraft.author} onChangeText={author => setBookDraft({ ...bookDraft, author })} maxLength={160} /><Input label="Sinopse e contexto da leitura" placeholder="Adicione a sinopse e um resumo dos capítulos para ajudar a IA a criar perguntas precisas." multiline value={bookDraft.synopsis} onChangeText={synopsis => setBookDraft({ ...bookDraft, synopsis })} maxLength={12000} /><Input label="Link da imagem da capa (opcional)" placeholder="https://…" value={bookDraft.cover_url ?? ''} onChangeText={cover_url => setBookDraft({ ...bookDraft, cover_url })} autoCapitalize="none" keyboardType="url" /><ErrorMessage message={error} /><Button title="Guardar na estante" onPress={saveBook} busy={busy} icon={<Plus size={18} color="#fff" />} /></ScrollArea></View></View></Modal>
+    <Modal visible={bookModal} transparent animationType="slide" onRequestClose={() => setBookModal(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><View style={s.sheet}><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, gap: 20 }}><View style={s.between}><Text style={t.section}>Mais uma história na estante</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBookModal(false)} style={s.centerButton}><X color={c.muted} size={20} /></Pressable></View><Input label="Título do livro" placeholder="Uma nova leitura" value={bookDraft.title} onChangeText={title => setBookDraft({ ...bookDraft, title })} maxLength={160} /><Input label="Autoria" placeholder="Quem escreveu?" value={bookDraft.author} onChangeText={author => setBookDraft({ ...bookDraft, author })} maxLength={160} /><View style={{ gap: 8 }}><Text style={s.uploadLabel}>ARQUIVO DO LIVRO</Text><Text style={[t.subtitle, { fontSize: 12 }]}>A IA usa este arquivo como fonte das perguntas. Você pode escolher qualquer formato; arquivos com até 50 MB.</Text><Pressable accessibilityRole="button" accessibilityLabel={bookFile ? `Trocar arquivo ${bookFile.name}` : 'Enviar arquivo do livro'} onPress={() => void pickBookFile()} style={s.filePicker}>{bookFile ? <FileText color={c.purple} size={21} /> : <Upload color={c.purple} size={21} />}<View style={{ flex: 1, gap: 2 }}><Text numberOfLines={1} style={{ color: c.ink, fontSize: 13, fontWeight: '600' }}>{bookFile?.name ?? 'Escolher arquivo'}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{bookFile ? `${bookFile.mimeType || 'Formato do arquivo'}${displaySize(bookFile.size) ? ` · ${displaySize(bookFile.size)}` : ''}` : 'PDF, EPUB, DOCX, TXT ou outro formato'}</Text></View><Text style={{ color: c.purple, fontSize: 12, fontWeight: '600' }}>{bookFile ? 'Trocar' : 'Enviar'}</Text></Pressable></View><Input label="Sinopse e contexto da leitura (opcional)" placeholder="Se quiser, adicione um resumo ou orientação para a conversa." multiline value={bookDraft.synopsis} onChangeText={synopsis => setBookDraft({ ...bookDraft, synopsis })} maxLength={12000} /><Input label="Link da imagem da capa (opcional)" placeholder="https://…" value={bookDraft.cover_url ?? ''} onChangeText={cover_url => setBookDraft({ ...bookDraft, cover_url })} autoCapitalize="none" keyboardType="url" /><ErrorMessage message={error} /><Button title="Guardar na estante" onPress={saveBook} busy={busy} icon={<Plus size={18} color="#fff" />} /></ScrollArea></View></View></Modal>
   </SafeAreaView></View></SafeAreaProvider>;
 }
 const s = StyleSheet.create({
@@ -188,5 +216,6 @@ const s = StyleSheet.create({
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { borderWidth: 1, borderColor: c.line, backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   chipOn: { borderColor: c.purple, backgroundColor: c.purple }, chipText: { color: '#5C5370', fontSize: 12 }, chipTextOn: { color: '#fff', fontWeight: '600' },
+  uploadLabel: { color: c.ink, fontWeight: '600', fontSize: 12 }, filePicker: { minHeight: 68, padding: 13, borderRadius: 14, borderWidth: 1, borderColor: c.line, backgroundColor: '#FCFAFF', flexDirection: 'row', alignItems: 'center', gap: 11 },
   overlay: { flex: 1, backgroundColor: '#241630AA', justifyContent: 'flex-end', alignItems: 'center' }, sheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxWidth: 480, width: '100%', maxHeight: '92%' },
 });
