@@ -224,7 +224,7 @@ Deno.serve(async request => {
 
     if (!questions && openRouterKey) {
       // OpenRouter free models only take text: EPUB/TXT go in (clipped from the start, which also avoids spoilers); PDFs fall back to title/synopsis.
-      const model = Deno.env.get('OPENROUTER_MODEL') || 'meta-llama/llama-3.3-70b-instruct:free';
+      const model = Deno.env.get('OPENROUTER_MODEL') || 'openrouter/free';
       const maxChars = Number(Deno.env.get('OPENROUTER_MAX_BOOK_CHARS')) || 250_000;
       const isText = /^text\//i.test(sourceBook.mimeType);
       const bookText = isText ? (await sourceBook.file.text()).slice(0, maxChars) : '';
