@@ -1,4 +1,5 @@
 import { db } from './supabase';
+import * as Linking from 'expo-linking';
 import type { Book, QuestionDraft, RoomInput, RoomSnapshot } from '../types';
 
 export async function ensureReader() {
@@ -64,6 +65,16 @@ export async function generateQuestions(roomId: string) {
 }
 export async function saveQuestions(roomId: string, questions: QuestionDraft[]) {
   return rpc('skoolk_save_questions', { p_room: roomId, p_questions: questions });
+}
+export async function requestPasswordReset(email: string) {
+  const { error } = await db().auth.resetPasswordForEmail(email.trim(), { redirectTo: Linking.createURL('/') });
+  if (error) throw error;
+}
+export async function updatePassword(password: string) {
+  const { error } = await db().auth.updateUser({ password });
+  if (error) throw error;
+  const { data } = await db().auth.getSession();
+  return data.session;
 }
 export async function listBooks(): Promise<Book[]> {
   const { data, error } = await db().from('skoolk_books').select('*').order('created_at', { ascending: false });

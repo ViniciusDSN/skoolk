@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { normalizeCode, validateJoin, validateChapters, nextPhase, average } from '../src/domain';
+import { normalizeCode, validateJoin, validateChapters, validateReset, nextPhase, average } from '../src/domain';
 
 test('entrada exige código completo e um apelido válido', () => {
   assert.equal(normalizeCode(' ab-c234 '), 'ABC234');
@@ -8,6 +8,12 @@ test('entrada exige código completo e um apelido válido', () => {
   assert.ok(validateJoin('ABC', 'Marina'));
   assert.ok(validateJoin('ABC234', ' '));
   assert.ok(validateJoin('ABC234', 'a'.repeat(25)));
+});
+test('nova senha exige oito caracteres e confirmação igual', () => {
+  assert.equal(validateReset('senha1234', 'senha1234'), null);
+  assert.ok(validateReset('curta7', 'curta7'));
+  assert.ok(validateReset('senha1234', 'senha4321'));
+  assert.ok(validateReset('', ''));
 });
 test('capítulos não aceitam NaN, fração, valores invertidos ou zero', () => {
   assert.equal(validateChapters(1, 12), null);

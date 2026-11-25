@@ -6,20 +6,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, FileText, Heart, LogOut, Plus, Sparkles, Upload, X } from 'lucide-react-native';
+import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, FileText, Heart, KeyRound, LogOut, Plus, Sparkles, Upload, X } from 'lucide-react-native';
 import type { Session } from '@supabase/supabase-js';
 import { Avatar, Back, Badge, BookCover, Button, Card, ErrorMessage, Input, typography as t } from './src/components/ui';
 import { colors as c, avatarColors } from './src/theme';
 import { avatarIcons } from './src/components/avatars';
 import { useKeyboardHeight } from './src/hooks/useKeyboardHeight';
 import { configured, db, supabase } from './src/lib/supabase';
-import { createRoom, ensureReader, listBooks, rpc } from './src/lib/api';
-import { MOMENTOS, TOPICOS, friendlyError, normalizeCode, rotuloPlano, validateChapters, validateJoin } from './src/domain';
+import { createRoom, ensureReader, listBooks, requestPasswordReset, rpc, updatePassword } from './src/lib/api';
+import { MOMENTOS, TOPICOS, friendlyError, normalizeCode, rotuloPlano, validateChapters, validateJoin, validateReset } from './src/domain';
 import { ScrollArea } from './src/components/ScrollArea';
 import { RoomScreen } from './src/screens/RoomScreen';
 import type { Book, QuestionMoment, QuestionPlanItem, QuestionTopic, Room } from './src/types';
 
-type Screen = 'home' | 'auth' | 'host' | 'create' | 'room';
+type Screen = 'home' | 'auth' | 'recover' | 'host' | 'create' | 'room';
 const initialBook: Book = { id: 'starter', title: 'A Toca da Raposa', author: 'Nora Sakavic', synopsis: 'Neil Josten se junta aos Raposas, o time de Exy da Universidade de Palmetto State. Entre segredos e alianças improváveis, o grupo enfrenta os desafios de confiar e pertencer. Discuta apenas os acontecimentos dos capítulos selecionados.', cover_url: null };
 const emptyBook: Book = { id: '', title: '', author: '', synopsis: '', cover_url: null };
 const rotuloSlot = (item: QuestionPlanItem | null) => rotuloPlano(item) ?? 'A IA escolhe';
@@ -32,6 +32,7 @@ export default function App() {
   const [ready, setReady] = useState(false), [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [code, setCode] = useState(''), [name, setName] = useState(''), [avatar, setAvatar] = useState(0);
   const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [signup, setSignup] = useState(false), [notice, setNotice] = useState<string | null>(null);
+  const [recoverStep, setRecoverStep] = useState<'email' | 'senha'>('email'), [newPassword, setNewPassword] = useState(''), [confirmPassword, setConfirmPassword] = useState('');
   const [books, setBooks] = useState<Book[]>([]), [rooms, setRooms] = useState<Room[]>([]);
   const [book, setBook] = useState<Book>(initialBook), [start, setStart] = useState('1'), [end, setEnd] = useState('12'), [count, setCount] = useState(6);
   const [bookModal, setBookModal] = useState(false), [bookDraft, setBookDraft] = useState<Book>(emptyBook);
@@ -49,9 +50,26 @@ export default function App() {
   };
   useEffect(() => {
     let mounted = true;
-    const applyLink = (url: string) => { const value = Linking.parse(url).queryParams?.code; if (typeof value === 'string') { setCode(normalizeCode(value)); setScreen('home'); } };
+    const applyLink = (url: string) => {
+      const value = Linking.parse(url).queryParams?.code;
+      if (typeof value === 'string') { setCode(normalizeCode(value)); setScreen('home'); return; }
+      const fragment = url.split('#')[1];
+      if (!fragment || !supabase) return;
+      const parts = new URLSearchParams(fragment);
+      const access_token = parts.get('access_token'), refresh_token = parts.get('refresh_token');
+      if (parts.get('type') !== 'recovery' || !access_token || !refresh_token) return;
+      void supabase.auth.setSession({ access_token, refresh_token }).then(({ error: falha }) => {
+        if (!mounted) return;
+        if (falha) { setError(friendlyError(falha)); return; }
+        setNewPassword(''); setConfirmPassword(''); setRecoverStep('senha'); setScreen('recover'); setError(null); setNotice(null);
+      });
+    };
     const linkSub = Linking.addEventListener('url', ({ url }) => applyLink(url));
-    const authSub = supabase?.auth.onAuthStateChange((_event, next) => { if (mounted) setSession(next); });
+    const authSub = supabase?.auth.onAuthStateChange((event, next) => {
+      if (!mounted) return;
+      setSession(next);
+      if (event === 'PASSWORD_RECOVERY') { setNewPassword(''); setConfirmPassword(''); setRecoverStep('senha'); setScreen('recover'); setError(null); setNotice(null); }
+    });
     void (async () => {
       try {
         const storedName = await AsyncStorage.getItem('skoolk.nickname');
@@ -90,6 +108,19 @@ export default function App() {
     if (result.error) throw result.error;
     if (!result.data.session) { setNotice('Confira seu e-mail para confirmar a conta. Depois, entre com sua senha.'); setSignup(false); return; }
     setSession(result.data.session); setPassword(''); navigate('host');
+  });
+  const openRecover = () => { setRecoverStep('email'); setNewPassword(''); setConfirmPassword(''); navigate('recover'); };
+  const askReset = () => void run(async () => {
+    if (!email.trim()) throw new Error('Informe o e-mail da sua conta.');
+    await requestPasswordReset(email);
+    setNotice('Se existir uma conta com esse e-mail, o link chega em instantes. Confira também a caixa de spam.');
+  });
+  const doReset = () => void run(async () => {
+    const message = validateReset(newPassword, confirmPassword); if (message) throw new Error(message);
+    const nova = await updatePassword(newPassword);
+    setNewPassword(''); setConfirmPassword(''); setRecoverStep('email'); setPassword('');
+    if (nova) { setSession(nova); navigate('host'); return; }
+    navigate('auth'); setNotice('Senha alterada. Entre com a senha nova.');
   });
   const saveBook = () => void run(async () => {
     if (!bookDraft.title.trim() || !bookDraft.author.trim()) throw new Error('Preencha o título e a autoria do livro.');
@@ -157,6 +188,20 @@ export default function App() {
           <Card><Input label="Seu e-mail" placeholder="voce@exemplo.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" /><Input label="Senha" placeholder="Pelo menos 8 caracteres" value={password} onChangeText={setPassword} secureTextEntry autoComplete={signup ? 'new-password' : 'current-password'} onSubmitEditing={authenticate} />
             <ErrorMessage message={error} />{notice && <Text accessibilityRole="alert" style={{ color: c.success, fontSize: 13, lineHeight: 20 }}>{notice}</Text>}<Button title={signup ? 'Criar minha conta' : 'Entrar como anfitriã'} onPress={authenticate} busy={busy} icon={<ArrowRight size={18} color="#fff" />} /></Card>
           <Pressable accessibilityRole="button" onPress={() => { setSignup(!signup); setError(null); }} style={s.centerButton}><Text style={{ color: c.purple, fontSize: 13 }}>{signup ? 'Já tenho uma conta · entrar' : 'Primeiro encontro? Crie sua conta'}</Text></Pressable>
+          {!signup && <Pressable accessibilityRole="button" onPress={openRecover} style={s.centerButton}><Text style={{ color: c.muted, fontSize: 12 }}>Esqueci minha senha</Text></Pressable>}
+        </View>
+      </> : screen === 'recover' ? <>
+        <View style={s.nav}><Back onPress={() => navigate('auth')} /><Text style={s.navBrand}>skoolk.</Text><View style={{ width: 44 }} /></View>
+        <View style={[s.content, { gap: 28, paddingTop: 30 }]}><View style={s.largeIcon}><KeyRound color={c.purple} size={29} strokeWidth={1.5} /></View><View style={{ gap: 12 }}><Text style={t.eyebrow}>RECUPERAR ACESSO</Text><Text style={t.title}>{recoverStep === 'senha' ? 'Agora escolha\numa senha nova.' : 'Esqueceu a senha?\nAcontece.'}</Text><Text style={t.subtitle}>{recoverStep === 'senha' ? 'Link confirmado. Escolha a senha que você vai usar daqui pra frente.' : 'Informe o e-mail da sua conta. A gente envia um link para você criar uma senha nova.'}</Text></View>
+          <Card>{recoverStep === 'senha'
+            ? <><Input label="Nova senha" placeholder="Pelo menos 8 caracteres" value={newPassword} onChangeText={setNewPassword} secureTextEntry autoComplete="new-password" />
+              <Input label="Repita a nova senha" placeholder="Digite de novo" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry autoComplete="new-password" onSubmitEditing={doReset} />
+              <ErrorMessage message={error} /><Button title="Salvar nova senha" onPress={doReset} busy={busy} icon={<Check size={18} color="#fff" />} /></>
+            : <><Input label="Seu e-mail" placeholder="voce@exemplo.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" onSubmitEditing={askReset} />
+              <ErrorMessage message={error} /><Button title="Enviar link de recuperação" onPress={askReset} busy={busy} icon={<ArrowRight size={18} color="#fff" />} /></>}
+            {notice && <Text accessibilityRole="alert" style={{ color: c.success, fontSize: 13, lineHeight: 20 }}>{notice}</Text>}
+          </Card>
+          {recoverStep === 'email' && <Pressable accessibilityRole="button" onPress={() => navigate('auth')} style={s.centerButton}><Text style={{ color: c.purple, fontSize: 13 }}>Lembrei a senha · voltar para o login</Text></Pressable>}
         </View>
       </> : screen === 'host' ? <>
         <View style={s.nav}><Back onPress={() => navigate('home')} /><Text style={s.navBrand}>skoolk.</Text><Pressable accessibilityRole="button" accessibilityLabel="Sair da conta" style={s.centerButton} onPress={() => void run(async () => { const { error } = await db().auth.signOut(); if (error) throw error; navigate('home'); })}><LogOut color={c.muted} size={19} /></Pressable></View>

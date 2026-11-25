@@ -20,6 +20,11 @@ export function validateJoin(code: string, nickname: string): string | null {
   if (nickname.trim().length < 2 || nickname.trim().length > 24) return 'Use um nome entre 2 e 24 caracteres.';
   return null;
 }
+export function validateReset(password: string, confirmacao: string): string | null {
+  if (password.length < 8) return 'A nova senha precisa ter pelo menos 8 caracteres.';
+  if (password !== confirmacao) return 'As duas senhas não são iguais.';
+  return null;
+}
 export function validateChapters(start: number, end: number): string | null {
   return Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end >= start && end <= 2000
     ? null : 'Confira os capítulos: o final deve ser igual ou maior que o inicial.';
@@ -43,6 +48,9 @@ export function friendlyError(error: unknown): string {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error ? String(error.message) : 'Algo deu errado. Tente novamente.';
   if (/email rate limit exceeded/i.test(message)) return 'O limite de envio de e-mails do clube foi atingido. Aguarde a liberação antes de tentar novamente. Se já confirmou sua conta, use a opção de entrar.';
   if (/email address not authorized|email address.*not allowed/i.test(message)) return 'O serviço de e-mail do clube ainda não permite enviar a confirmação para este endereço. A administração precisa configurar o envio de e-mails.';
+  if (/Token has expired or is invalid|otp_expired|Invalid token/i.test(message)) return 'O link expirou ou já foi usado. Peça outro e-mail de recuperação.';
+  if (/New password should be different/i.test(message)) return 'A nova senha precisa ser diferente da anterior.';
+  if (/For security purposes|after \d+ seconds/i.test(message)) return 'Aguarde alguns segundos antes de pedir outro e-mail.';
   if (/Invalid login credentials/i.test(message)) return 'E-mail ou senha incorretos.';
   if (/Email not confirmed/i.test(message)) return 'Confirme seu e-mail antes de entrar.';
   if (/Anonymous sign-ins are disabled/i.test(message)) return 'A entrada de leitores ainda não foi habilitada. Avise a anfitriã.';
