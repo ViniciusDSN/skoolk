@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import QRCode from 'react-native-qrcode-svg';
-import { ArrowRight, BookOpen, Check, ChevronRight, Copy, LogOut, MessageCircle, QrCode, Share2, Sparkles, Star, Users, X } from 'lucide-react-native';
+import { ArrowRight, BookOpen, Check, ChevronRight, Copy, HelpCircle, LogOut, MessageCircle, QrCode, Share2, Sparkles, Star, Users, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScrollArea } from '../components/ScrollArea';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useRoom } from '../hooks/useRoom';
@@ -12,6 +13,8 @@ import { generateQuestions, loadRoom, rpc, saveQuestions } from '../lib/api';
 import { average, friendlyError, nextPhase, rankedQuestions, rotuloPlano } from '../domain';
 import { colors as c } from '../theme';
 import { Avatar, Badge, BookCover, Button, Card, ErrorMessage, Input, Stars, typography as t } from '../components/ui';
+import { Tour } from '../components/Tour';
+import { TOUR_SALA_DINAMICA, TOUR_SALA_ESPERA } from '../tours';
 import type { Question, QuestionDraft } from '../types';
 
 const BLANK: QuestionDraft = { prompt: '', category: 'Discussão', hint: 'Compartilhe sua leitura e escute os outros pontos de vista.', source: 'manual' };
@@ -30,6 +33,16 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
   const [rating, setRating] = useState(0), [bookRating, setBookRating] = useState(0), [discussionRating, setDiscussionRating] = useState(0);
   const [questionsOpen, setQuestionsOpen] = useState(false), [drafts, setDrafts] = useState<QuestionDraft[]>([]);
   const scrollRef = useRef<ScrollView>(null);
+  const [tour, setTour] = useState(false);
+  const alvos = useRef<Record<string, View | null>>({});
+  const rolagem = useRef(0), raiz = useRef<View>(null);
+  const limites = useRef({ viewport: 0, content: 0 });
+  const aoRolar = useCallback((delta: number) => {
+    const maximo = Math.max(0, limites.current.content - limites.current.viewport);
+    const destino = Math.min(maximo, Math.max(0, rolagem.current + delta));
+    rolagem.current = destino;
+    scrollRef.current?.scrollTo({ y: destino, animated: true });
+  }, []);
   const keyboard = useKeyboardHeight();
   const me = demo ? 'demo-host' : userId;
   const room = data?.room, host = room?.host_id === me;
@@ -38,6 +51,19 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
   const savedRating = data?.ratings.find(r => r.question_id === question?.id && r.user_id === me)?.stars ?? 0;
   const myFeedback = data?.feedback.find(f => f.user_id === me);
   useEffect(() => { setRating(savedRating); }, [question?.id, savedRating]);
+  const fase = room?.phase === 'lobby' ? 'espera' : 'dinamica';
+  useEffect(() => {
+    if (demo || !room || room.phase === 'finished') return;
+    let valido = true;
+    void (async () => {
+      const chave = `skoolk.tour.sala.${fase}`;
+      const visto = await AsyncStorage.getItem(chave);
+      if (!valido || visto) return;
+      await AsyncStorage.setItem(chave, '1');
+      setTimeout(() => { if (valido) setTour(true); }, 650);
+    })();
+    return () => { valido = false; };
+  }, [demo, fase, room?.phase]);
   useEffect(() => { if (myFeedback) { setBookRating(myFeedback.book_stars); setDiscussionRating(myFeedback.discussion_stars); } }, [myFeedback?.book_stars, myFeedback?.discussion_stars]);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true); setError(null);
@@ -84,14 +110,17 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
   const openQuestions = () => { setError(null); setDrafts(seedDrafts(data?.questions ?? [], room?.question_count ?? 0)); setQuestionsOpen(true); };
   const joinUrl = Linking.createURL('/', { queryParams: { code: room.code } });
   return <LinearGradient colors={['#916CE1', '#7452B7']} style={{ flex: 1 }}>
-    <ScrollArea ref={scrollRef} light contentContainerStyle={{ paddingBottom: 24 }}>
+    <View ref={raiz} collapsable={false} style={{ flex: 1 }}>
+    <ScrollArea ref={scrollRef} light scrollEnabled={!tour} onScroll={event => { rolagem.current = event.nativeEvent.contentOffset.y; }}
+        onLayout={event => { limites.current.viewport = event.nativeEvent.layout.height; }}
+        onContentSizeChange={(_largura, altura) => { limites.current.content = altura; }} contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={s.roomHeader}>
-        <View style={s.topline}><Text style={s.wordmark}>skoolk<Text style={{ color: '#D8C7F2' }}>.</Text></Text><Badge light>{demo ? 'DEMONSTRAÇÃO' : host ? 'ANFITRIÃ' : 'LEITOR'}</Badge></View>
+        <View style={s.topline}><Text style={s.wordmark}>skoolk<Text style={{ color: '#D8C7F2' }}>.</Text></Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>{!isFinished && <Pressable accessibilityRole="button" accessibilityLabel="Como funciona" onPress={() => setTour(true)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><HelpCircle size={19} color="#D8C7F2" /></Pressable>}<Badge light>{demo ? 'DEMONSTRAÇÃO' : host ? 'ANFITRIÃ' : 'LEITOR'}</Badge></View></View>
         <View style={s.bookRow}><BookCover title={room.book_title} uri={room.cover_url} small /><View style={{ flex: 1, gap: 5 }}><Text style={s.bookTitle}>{room.book_title}</Text><Text style={s.author}>{room.book_author}</Text><Text style={s.chapters}>Capítulos {room.chapter_start} — {room.chapter_end}</Text></View>
           <Pressable accessibilityLabel="Compartilhar código da sala" accessibilityRole="button" onPress={() => setModal('share')} style={s.iconButton}><QrCode size={22} color="#fff" /></Pressable>
         </View>
         <View style={s.roomStats}>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Código da sala ${room.code}, copiar`} onPress={() => void act(async () => { await Clipboard.setStringAsync(room.code); setCopied(true); })} style={s.stat}>
+          <Pressable collapsable={false} ref={node => { alvos.current.codigo = node; }} accessibilityRole="button" accessibilityLabel={`Código da sala ${room.code}, copiar`} onPress={() => void act(async () => { await Clipboard.setStringAsync(room.code); setCopied(true); })} style={s.stat}>
             <Text style={s.statLabel}>{copied ? 'Código copiado!' : 'Código da sala'}</Text><View style={s.row}><Text style={s.code}>{room.code}</Text><Copy size={12} color="#D8C7EF" /></View>
           </Pressable><View style={s.statDivider} /><View style={s.stat}><Text style={s.statLabel}>Participantes</Text><View style={s.row}><Users size={14} color="#fff" /><Text style={s.code}>{data.members.length.toString().padStart(2, '0')}</Text></View></View>
           <View style={[s.dot, { backgroundColor: connected ? '#C4EDD5' : '#F4D18A' }]} accessibilityLabel={connected ? 'Conectado' : 'Reconectando'} />
@@ -102,9 +131,10 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
         <ErrorMessage message={error ?? loadError} />
         {room.phase === 'lobby' ? <>
           <View style={{ gap: 6 }}><Text style={s.whiteTitle}>{host ? 'Um novo capítulo começa.' : 'Você chegou. Puxe uma cadeira.'}</Text><Text style={s.whiteSubtitle}>{host ? 'Convide os leitores e prepare a conversa.' : 'A anfitriã vai iniciar a dinâmica em instantes.'}</Text></View>
+          <View collapsable={false} ref={node => { alvos.current.leitores = node; }}>
           <Card><View style={s.between}><Text style={t.section}>Na mesma página</Text><Badge>{data.members.length} leitores</Badge></View><View style={s.members}>{data.members.map(m => <View key={m.user_id} style={s.member}><Avatar name={m.nickname} index={m.avatar} /><Text numberOfLines={1} style={s.memberName}>{m.nickname}</Text>{m.user_id === room.host_id && <Text style={{ fontSize: 9, color: c.purple }}>anfitriã</Text>}</View>)}</View>
             {!demo && <Text style={[t.subtitle, { textAlign: 'center', fontSize: 12 }]}>Quem entrar com o código aparece aqui.</Text>}
-          </Card>
+          </Card></View>
           {host && <Card style={{ gap: 14 }}><Text style={t.eyebrow}>ESCOLHA UMA DINÂMICA</Text><View style={s.row}><View style={s.iconTile}><MessageCircle size={23} color={c.purple} /></View><View style={{ flex: 1, gap: 4 }}><Text style={t.section}>Entre perguntas e páginas</Text><Text style={[t.subtitle, { fontSize: 12 }]}>{room.question_count} perguntas para abrir a conversa</Text></View></View>
             {data.questions.length > 0 && <View style={s.row}><Check size={16} color={c.success} /><Text style={{ color: c.success, fontSize: 12 }}>{data.questions.length} de {room.question_count} perguntas prontas</Text></View>}
             {room.question_plan.some(p => rotuloPlano(p)) && <View style={{ gap: 9, borderTopWidth: 1, borderColor: c.line, paddingTop: 14 }}>
@@ -129,22 +159,24 @@ export function RoomScreen({ roomId, userId, demo, onLeave }: { roomId: string; 
         </> : <>
           <View style={s.tabs}>{(['synopsis', 'questions'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => setTab(value)} style={[s.tab, tab === value && s.tabActive]}><Text style={[s.tabText, tab === value && { color: '#fff', fontWeight: '600' }]}>{value === 'synopsis' ? 'Sinopse' : 'Perguntas'}</Text></Pressable>)}</View>
           {tab === 'synopsis' ? <Card style={{ minHeight: 350, justifyContent: 'center' }}><BookOpen size={28} color={c.purple} style={{ alignSelf: 'center' }} /><Text style={[t.section, { textAlign: 'center' }]}>{room.book_title}</Text><Text style={s.synopsis}>{room.synopsis || 'A anfitriã ainda não adicionou uma sinopse.'}</Text></Card> : <>
-            <View style={s.cardStack}><View style={s.stackBack} /><View style={s.stackMiddle} /><Card style={{ minHeight: 363, padding: 24 }}>
+            <View collapsable={false} ref={node => { alvos.current.pergunta = node; }} style={s.cardStack}><View style={s.stackBack} /><View style={s.stackMiddle} /><Card style={{ minHeight: 363, padding: 24 }}>
               <View style={s.between}><Text style={{ color: c.purple, fontSize: 12, fontWeight: '600' }}>{String(room.current_question + 1).padStart(2, '0')} <Text style={{ color: '#BFB4CF', fontWeight: '400' }}>/ {String(room.question_count).padStart(2, '0')}</Text></Text><Badge>{room.phase === 'rating' ? 'HORA DE AVALIAR' : 'EM DISCUSSÃO'}</Badge></View>
               <View style={{ alignItems: 'center', paddingTop: 6, gap: 9 }}><View style={[s.iconTile, { borderRadius: 30, width: 42, height: 42 }]}><MessageCircle size={21} color={c.purple} /></View><Text style={{ color: c.purple, fontSize: 11 }}>{question?.category ?? 'Carregando'}{question?.source === 'ia' ? ' · gerada por IA' : ''}</Text></View>
               <Text style={s.question}>{question?.prompt ?? 'Carregando a próxima pergunta…'}</Text><Text style={s.hint}>{question?.hint}</Text>
               {room.phase === 'rating' ? <View style={s.ratingBlock}><Text style={s.ratingLabel}>Essa pergunta rendeu uma boa conversa?</Text><Stars label="Pergunta" value={rating} onChange={setRating} disabled={busy || !!savedRating} /><View style={s.between}><Text style={s.starLabel}>Nem tanto</Text><Text style={s.starLabel}>Rendeu muito!</Text></View>{savedRating ? <Text style={{ color: c.success, textAlign: 'center', fontSize: 12, marginTop: 12 }}>✓ Sua avaliação foi registrada</Text> : <Button title="Enviar avaliação" busy={busy} disabled={!rating} onPress={submitRating} />}</View> : <View style={s.discussNote}><Users size={16} color={c.muted} /><Text style={{ color: c.muted, fontSize: 11 }}>Escute, compartilhe, descubra outro ponto de vista.</Text></View>}
             </Card></View>
-            <View style={s.dots}>{Array.from({ length: room.question_count }, (_, i) => <View key={i} style={[s.progressDot, i === room.current_question && { width: 20, backgroundColor: '#fff' }, i < room.current_question && { backgroundColor: '#D8C3F4' }]} />)}</View>
+            <View collapsable={false} ref={node => { alvos.current.progresso = node; }} style={s.dots}>{Array.from({ length: room.question_count }, (_, i) => <View key={i} style={[s.progressDot, i === room.current_question && { width: 20, backgroundColor: '#fff' }, i < room.current_question && { backgroundColor: '#D8C3F4' }]} />)}</View>
 
           </>}
         </>}
       </View>
     </ScrollArea>
-    <View style={s.actionBar}>
+    <View collapsable={false} ref={node => { alvos.current.acao = node; }} style={s.actionBar}>
       {host && room.phase === 'lobby' && (data.questions.length >= room.question_count ? <Button title="Começar a dinâmica" busy={busy} onPress={advance} icon={<ArrowRight size={18} color="#fff" />} /> : <Button title={data.questions.length ? 'Completar as perguntas' : 'Preparar as perguntas'} busy={busy} onPress={openQuestions} icon={<Sparkles size={18} color="#fff" />} />)}
       {room.phase !== 'lobby' && !isFinished && (host ? <View style={{ gap: 6 }}><View style={s.between}><Text style={s.whiteSubtitle}>{room.phase === 'rating' ? `${votes.length} de ${data.members.length} avaliações` : 'Todo mundo já compartilhou?'}</Text>{room.phase === 'rating' && <Text style={{ color: '#fff', fontSize: 12 }}>{votes.length ? average(votes).toFixed(1) + ' ★' : ''}</Text>}</View><Button secondary title={room.phase === 'discussion' ? 'Encerrar pergunta e avaliar' : room.current_question + 1 >= room.question_count ? 'Finalizar encontro' : 'Próxima pergunta'} busy={busy} onPress={() => room.phase === 'rating' && votes.length < data.members.length && !demo ? setModal('advance') : advance()} icon={<ChevronRight size={19} color={c.purple} />} /></View> : <View style={s.textButton}><View style={[s.dot, { position: 'relative', backgroundColor: '#D9C9F0', right: 0, top: 0 }]} /><Text style={s.whiteSubtitle}>{room.phase === 'rating' && savedRating ? 'Aguardando a próxima pergunta…' : 'A anfitriã conduz a conversa.'}</Text></View>)}
       {isFinished ? <Button title="Voltar para o início" secondary onPress={onLeave} /> : <Pressable accessibilityRole="button" onPress={() => setModal('leave')} style={s.textButton}><LogOut size={15} color="#EFE7FB" /><Text style={{ color: '#EFE7FB', fontSize: 12 }}>{host ? 'Sair da sala' : 'Sair do encontro'}</Text></Pressable>}
+    </View>
+    <Tour passos={fase === 'espera' ? TOUR_SALA_ESPERA : TOUR_SALA_DINAMICA} alvos={alvos} raiz={raiz} visivel={tour} onFechar={() => setTour(false)} aoRolar={aoRolar} />
     </View>
     <Modal visible={questionsOpen} transparent animationType="slide" onRequestClose={() => setQuestionsOpen(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><Card style={{ width: '100%', maxWidth: 400, maxHeight: '90%', padding: 20 }}><View style={s.between}><Text style={[t.section, { flex: 1 }]}>A conversa começa com você</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar perguntas" onPress={() => setQuestionsOpen(false)} style={{ padding: 8 }}><X size={20} color={c.muted} /></Pressable></View><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 18 }}>
       <Text style={t.subtitle}>Escreva as que quiser e deixe o resto com a IA. {filled} de {room.question_count} prontas.</Text>

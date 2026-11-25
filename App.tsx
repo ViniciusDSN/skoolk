@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, FileText, Heart, KeyRound, LogOut, Plus, Sparkles, Upload, X } from 'lucide-react-native';
+import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, ChevronUp, Crown, FileText, Heart, HelpCircle, KeyRound, LogOut, Plus, Sparkles, Upload, X } from 'lucide-react-native';
 import type { Session } from '@supabase/supabase-js';
 import { Avatar, Back, Badge, BookCover, Button, Card, ErrorMessage, Input, typography as t } from './src/components/ui';
 import { colors as c, avatarColors } from './src/theme';
@@ -16,6 +16,8 @@ import { configured, db, supabase } from './src/lib/supabase';
 import { createRoom, ensureReader, listBooks, requestPasswordReset, rpc, updatePassword } from './src/lib/api';
 import { MOMENTOS, TOPICOS, friendlyError, normalizeCode, rotuloPlano, validateChapters, validateJoin, validateReset } from './src/domain';
 import { ScrollArea } from './src/components/ScrollArea';
+import { Tour, type TourPasso } from './src/components/Tour';
+import { TOUR_ANFITRIA, TOUR_INICIO } from './src/tours';
 import { RoomScreen } from './src/screens/RoomScreen';
 import type { Book, QuestionMoment, QuestionPlanItem, QuestionTopic, Room } from './src/types';
 
@@ -33,6 +35,16 @@ export default function App() {
   const [code, setCode] = useState(''), [name, setName] = useState(''), [avatar, setAvatar] = useState(0);
   const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [signup, setSignup] = useState(false), [notice, setNotice] = useState<string | null>(null);
   const [recoverStep, setRecoverStep] = useState<'email' | 'senha'>('email'), [newPassword, setNewPassword] = useState(''), [confirmPassword, setConfirmPassword] = useState('');
+  const [tour, setTour] = useState<TourPasso[] | null>(null);
+  const alvos = useRef<Record<string, View | null>>({});
+  const rolagem = useRef(0), scrollRef = useRef<ScrollView>(null), raiz = useRef<View>(null);
+  const limites = useRef({ viewport: 0, content: 0 });
+  const aoRolar = useCallback((delta: number) => {
+    const maximo = Math.max(0, limites.current.content - limites.current.viewport);
+    const destino = Math.min(maximo, Math.max(0, rolagem.current + delta));
+    rolagem.current = destino;
+    scrollRef.current?.scrollTo({ y: destino, animated: true });
+  }, []);
   const [books, setBooks] = useState<Book[]>([]), [rooms, setRooms] = useState<Room[]>([]);
   const [book, setBook] = useState<Book>(initialBook), [start, setStart] = useState('1'), [end, setEnd] = useState('12'), [count, setCount] = useState(6);
   const [bookModal, setBookModal] = useState(false), [bookDraft, setBookDraft] = useState<Book>(emptyBook);
@@ -95,6 +107,19 @@ export default function App() {
     if (r.error) throw r.error; setBooks(b); setRooms(r.data as Room[]);
   };
   useEffect(() => { if (screen === 'host' && isHost) void run(refreshHost); }, [screen, session?.user.id]);
+  useEffect(() => {
+    if (!ready) return;
+    const tela = screen === 'home' ? 'inicio' : screen === 'host' && isHost ? 'anfitria' : null;
+    if (!tela) return;
+    let valido = true;
+    void (async () => {
+      const visto = await AsyncStorage.getItem(`skoolk.tour.${tela}`);
+      if (!valido || visto) return;
+      await AsyncStorage.setItem(`skoolk.tour.${tela}`, '1');
+      setTimeout(() => { if (valido) setTour(tela === 'inicio' ? TOUR_INICIO : TOUR_ANFITRIA); }, 550);
+    })();
+    return () => { valido = false; };
+  }, [screen, ready, isHost]);
   const join = () => void run(async () => {
     const message = validateJoin(code, name); if (message) throw new Error(message);
     const user = await ensureReader();
@@ -162,20 +187,25 @@ export default function App() {
   const keyboard = useKeyboardHeight();
   const lightStatus = screen === 'home' || screen === 'room';
   return <SafeAreaProvider><View style={s.outer}><SafeAreaView style={[s.app, { backgroundColor: lightStatus ? c.purple : c.background }]} edges={['top', 'bottom']}>
+    <View ref={raiz} collapsable={false} style={{ flex: 1 }}>
     <StatusBar style={lightStatus ? 'light' : 'dark'} />
     {!ready ? <View style={s.loading}><ActivityIndicator color="#fff" size="large" /><Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>skoolk.</Text></View> : screen === 'room' && roomId ? <RoomScreen key={roomId} roomId={roomId} userId={session?.user.id ?? ''} demo={demo} onLeave={leaveRoom} /> : <View style={{ flex: 1 }}>
-      <ScrollArea contentContainerStyle={{ flexGrow: 1, paddingBottom: 28, backgroundColor: c.background }} keyboardShouldPersistTaps="handled">
+      <ScrollArea ref={scrollRef} scrollEnabled={!tour} onScroll={event => { rolagem.current = event.nativeEvent.contentOffset.y; }}
+        onLayout={event => { limites.current.viewport = event.nativeEvent.layout.height; }}
+        onContentSizeChange={(_largura, altura) => { limites.current.content = altura; }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 28, backgroundColor: c.background }} keyboardShouldPersistTaps="handled">
       {screen === 'home' ? <>
         <LinearGradient colors={['#926CE4', '#7550B8']} style={s.hero}>
-          <View style={s.between}><Text style={s.wordmark}>skoolk<Text style={{ color: '#DCCBF6' }}>.</Text></Text><View style={s.heart}><Heart size={19} color="#E6D7FD" strokeWidth={1.5} /></View></View>
+          <View style={s.between}><Text style={s.wordmark}>skoolk<Text style={{ color: '#DCCBF6' }}>.</Text></Text><View style={{ flexDirection: 'row', gap: 10 }}><Pressable accessibilityRole="button" accessibilityLabel="Como funciona" onPress={() => setTour(TOUR_INICIO)} style={s.heart}><HelpCircle size={19} color="#E6D7FD" strokeWidth={1.5} /></Pressable><View style={s.heart}><Heart size={19} color="#E6D7FD" strokeWidth={1.5} /></View></View></View>
           <View style={{ gap: 10, paddingTop: 30 }}><Text style={s.heroEyebrow}>HISTÓRIAS QUE APROXIMAM</Text><Text style={s.heroTitle}>Um livro.{'\n'}Muitos pontos{'\n'}de vista.</Text><Text style={s.heroSubtitle}>Seu clube do livro, na mesma página.</Text></View>
           <View style={s.heroFooter}><View style={{ flexDirection: 'row' }}>{[3, 0, 4].map((v, i) => <View key={v} style={{ marginLeft: i ? -8 : 0, borderWidth: 3, borderColor: '#7B56BD', borderRadius: 18 }}><Avatar name="Leitores" index={v} size={30} /></View>)}</View><Text style={{ color: '#E3D4F7', fontSize: 11 }}>A melhor parte da leitura{'\n'}é o que a gente compartilha.</Text><Sparkles size={27} color="#D3B9F7" strokeWidth={1} style={{ marginLeft: 'auto' }} /></View>
         </LinearGradient>
         <View style={s.content}>
           <Card style={{ marginTop: -20, gap: 19 }}><View style={{ gap: 5 }}><Text style={[t.title, { fontSize: 25 }]}>Entre na conversa</Text><Text style={t.subtitle}>Pegue o código com a anfitriã e chegue mais.</Text></View>
-            <Input label="Código do encontro" placeholder="EX.: ABC234" value={code} onChangeText={value => setCode(normalizeCode(value))} autoCapitalize="characters" autoCorrect={false} maxLength={6} style={{ fontSize: 19, letterSpacing: 5, fontWeight: '600' }} />
+            <View collapsable={false} ref={node => { alvos.current.codigo = node; }}><Input label="Código do encontro" placeholder="EX.: ABC234" value={code} onChangeText={value => setCode(normalizeCode(value))} autoCapitalize="characters" autoCorrect={false} maxLength={6} style={{ fontSize: 19, letterSpacing: 5, fontWeight: '600' }} /></View>
+            <View collapsable={false} ref={node => { alvos.current.perfil = node; }} style={{ gap: 19 }}>
             <Input label="Como podemos te chamar?" placeholder="Seu nome ou apelido" value={name} onChangeText={setName} maxLength={24} autoComplete="nickname" onSubmitEditing={join} returnKeyType="go" />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{avatarIcons.map((Icon, i) => <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Avatar ${i + 1}`} accessibilityState={{ selected: avatar === i }} onPress={() => setAvatar(i)} style={[s.avatarOption, { backgroundColor: avatarColors[i], borderColor: avatar === i ? c.purple : 'transparent' }]}><Icon size={21} color={c.purpleDark} strokeWidth={1.6} /></Pressable>)}</View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{avatarIcons.map((Icon, i) => <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Avatar ${i + 1}`} accessibilityState={{ selected: avatar === i }} onPress={() => setAvatar(i)} style={[s.avatarOption, { backgroundColor: avatarColors[i], borderColor: avatar === i ? c.purple : 'transparent' }]}><Icon size={21} color={c.purpleDark} strokeWidth={1.6} /></Pressable>)}</View></View>
             <ErrorMessage message={error} /><Button title="Entrar no encontro" onPress={join} busy={busy} icon={<ArrowRight size={18} color="#fff" />} /><View style={[s.row, { justifyContent: 'center', gap: 5 }]}><Check size={12} color={c.muted} /><Text style={{ fontSize: 10, color: c.muted }}>Sem cadastro. Só você e uma boa conversa.</Text></View>
           </Card>
           <Pressable accessibilityRole="button" accessibilityLabel="Sou anfitriã" onPress={() => navigate(isHost ? 'host' : 'auth')} style={s.hostEntry}><View style={s.crown}><Crown size={22} color={c.purple} strokeWidth={1.5} /></View><View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.ink, fontWeight: '600', fontSize: 13 }}>Você prepara o encontro?</Text><Text style={{ color: c.muted, fontSize: 11 }}>Acesse o espaço da anfitriã</Text></View><ChevronRight size={19} color={c.purple} /></Pressable>
@@ -204,14 +234,17 @@ export default function App() {
           {recoverStep === 'email' && <Pressable accessibilityRole="button" onPress={() => navigate('auth')} style={s.centerButton}><Text style={{ color: c.purple, fontSize: 13 }}>Lembrei a senha · voltar para o login</Text></Pressable>}
         </View>
       </> : screen === 'host' ? <>
-        <View style={s.nav}><Back onPress={() => navigate('home')} /><Text style={s.navBrand}>skoolk.</Text><Pressable accessibilityRole="button" accessibilityLabel="Sair da conta" style={s.centerButton} onPress={() => void run(async () => { const { error } = await db().auth.signOut(); if (error) throw error; navigate('home'); })}><LogOut color={c.muted} size={19} /></Pressable></View>
+        <View style={s.nav}><Back onPress={() => navigate('home')} /><Text style={s.navBrand}>skoolk.</Text><View style={{ flexDirection: 'row' }}><Pressable accessibilityRole="button" accessibilityLabel="Como funciona" style={s.centerButton} onPress={() => setTour(TOUR_ANFITRIA)}><HelpCircle color={c.muted} size={19} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Sair da conta" style={s.centerButton} onPress={() => void run(async () => { const { error } = await db().auth.signOut(); if (error) throw error; navigate('home'); })}><LogOut color={c.muted} size={19} /></Pressable></View></View>
         <View style={[s.content, { gap: 25 }]}><View style={{ gap: 9 }}><Text style={t.eyebrow}>SEU CLUBE, SEU RITMO</Text><Text style={t.title}>Bom ter você aqui.</Text><Text style={t.subtitle}>Qual história vai reunir a gente hoje?</Text></View>
-          <LinearGradient colors={['#8F68DD', '#6B44AD']} style={s.hostHero}><View style={s.between}><View style={s.heart}><BookOpen size={24} color="#fff" /></View><Sparkles size={23} color="#D8C4FA" /></View><Text style={{ color: '#fff', fontSize: 24, lineHeight: 31, fontWeight: '600', letterSpacing: -.7 }}>Uma sala aberta.{'\n'}Infinitas interpretações.</Text><Button title="Criar um encontro" secondary onPress={() => { if (books.length) setBook(books[0]); navigate('create'); }} icon={<Plus size={18} color={c.purple} />} /></LinearGradient>
+          <View collapsable={false} ref={node => { alvos.current.criar = node; }}>
+          <LinearGradient colors={['#8F68DD', '#6B44AD']} style={s.hostHero}><View style={s.between}><View style={s.heart}><BookOpen size={24} color="#fff" /></View><Sparkles size={23} color="#D8C4FA" /></View><Text style={{ color: '#fff', fontSize: 24, lineHeight: 31, fontWeight: '600', letterSpacing: -.7 }}>Uma sala aberta.{'\n'}Infinitas interpretações.</Text><Button title="Criar um encontro" secondary onPress={() => { if (books.length) setBook(books[0]); navigate('create'); }} icon={<Plus size={18} color={c.purple} />} /></LinearGradient></View>
           <ErrorMessage message={error} />
+          <View collapsable={false} ref={node => { alvos.current.encontros = node; }} style={{ gap: 25 }}>
           <View style={s.between}><Text style={t.section}>Seus encontros</Text><Pressable accessibilityRole="button" onPress={() => void run(refreshHost)} style={s.centerButton}><Text style={{ color: c.purple, fontSize: 12 }}>Atualizar</Text></Pressable></View>
-          {busy && <ActivityIndicator color={c.purple} />}{!rooms.length && !busy ? <Card><Text style={t.subtitle}>Seu primeiro encontro está esperando por você. Escolha um livro e convide o clube.</Text></Card> : rooms.map(r => <Pressable key={r.id} accessibilityRole="button" accessibilityLabel={`Abrir encontro ${r.book_title} ${r.code}`} onPress={() => void run(async () => { await enterRoom(r.id); })}><Card style={{ padding: 18 }}><View style={s.row}><BookCover title={r.book_title} uri={r.cover_url} small /><View style={{ flex: 1, gap: 7 }}><Text style={{ color: c.ink, fontSize: 14, fontWeight: '600' }}>{r.book_title}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{r.code} · Cap. {r.chapter_start}–{r.chapter_end}</Text><Badge>{r.phase === 'finished' ? 'FINALIZADO' : r.phase === 'lobby' ? 'SALA DE ESPERA' : 'EM ANDAMENTO'}</Badge></View><ChevronRight size={17} color={c.purple} /></View></Card></Pressable>)}
+          {busy && <ActivityIndicator color={c.purple} />}{!rooms.length && !busy ? <Card><Text style={t.subtitle}>Seu primeiro encontro está esperando por você. Escolha um livro e convide o clube.</Text></Card> : rooms.map(r => <Pressable key={r.id} accessibilityRole="button" accessibilityLabel={`Abrir encontro ${r.book_title} ${r.code}`} onPress={() => void run(async () => { await enterRoom(r.id); })}><Card style={{ padding: 18 }}><View style={s.row}><BookCover title={r.book_title} uri={r.cover_url} small /><View style={{ flex: 1, gap: 7 }}><Text style={{ color: c.ink, fontSize: 14, fontWeight: '600' }}>{r.book_title}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{r.code} · Cap. {r.chapter_start}–{r.chapter_end}</Text><Badge>{r.phase === 'finished' ? 'FINALIZADO' : r.phase === 'lobby' ? 'SALA DE ESPERA' : 'EM ANDAMENTO'}</Badge></View><ChevronRight size={17} color={c.purple} /></View></Card></Pressable>)}</View>
+          <View collapsable={false} ref={node => { alvos.current.estante = node; }} style={{ gap: 25 }}>
           <View style={s.between}><Text style={t.section}>Sua estante</Text><Pressable accessibilityRole="button" onPress={addBook} style={s.centerButton}><Plus size={18} color={c.purple} /><Text style={{ color: c.purple, fontSize: 12 }}>Adicionar</Text></Pressable></View>
-          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ gap: 20 }}>{(books.length ? books : [initialBook]).map(b => <Pressable key={b.id} accessibilityRole="button" accessibilityLabel={`Preparar encontro de ${b.title}`} onPress={() => { setBook(b); navigate('create'); }} style={{ width: 106, gap: 9 }}><BookCover title={b.title} uri={b.cover_url} /><Text numberOfLines={2} style={{ color: c.ink, fontSize: 12, fontWeight: '500' }}>{b.title}</Text><Text numberOfLines={1} style={{ color: c.muted, fontSize: 10 }}>{b.author}</Text></Pressable>)}</ScrollView>
+          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ gap: 20 }}>{(books.length ? books : [initialBook]).map(b => <Pressable key={b.id} accessibilityRole="button" accessibilityLabel={`Preparar encontro de ${b.title}`} onPress={() => { setBook(b); navigate('create'); }} style={{ width: 106, gap: 9 }}><BookCover title={b.title} uri={b.cover_url} /><Text numberOfLines={2} style={{ color: c.ink, fontSize: 12, fontWeight: '500' }}>{b.title}</Text><Text numberOfLines={1} style={{ color: c.muted, fontSize: 10 }}>{b.author}</Text></Pressable>)}</ScrollView></View>
         </View>
       </> : <>
         <View style={s.nav}><Back onPress={() => navigate('host')} /><Text style={s.navTitle}>Novo encontro</Text><Badge>01 / 01</Badge></View>
@@ -240,6 +273,8 @@ export default function App() {
       </>}
       </ScrollArea>
     </View>}
+    <Tour passos={tour ?? []} alvos={alvos} raiz={raiz} visivel={!!tour} onFechar={() => setTour(null)} aoRolar={aoRolar} />
+    </View>
     <Modal visible={bookModal} transparent animationType="slide" onRequestClose={() => setBookModal(false)}><View style={[s.overlay, { paddingBottom: keyboard }]}><View style={s.sheet}><ScrollArea compact avoidKeyboard={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, gap: 20 }}><View style={s.between}><Text style={t.section}>Mais uma história na estante</Text><Pressable accessibilityRole="button" accessibilityLabel="Fechar" onPress={() => setBookModal(false)} style={s.centerButton}><X color={c.muted} size={20} /></Pressable></View><Input label="Título do livro" placeholder="Uma nova leitura" value={bookDraft.title} onChangeText={title => setBookDraft({ ...bookDraft, title })} maxLength={160} /><Input label="Autoria" placeholder="Quem escreveu?" value={bookDraft.author} onChangeText={author => setBookDraft({ ...bookDraft, author })} maxLength={160} /><View style={{ gap: 8 }}><Text style={s.uploadLabel}>ARQUIVO DO LIVRO</Text><Text style={[t.subtitle, { fontSize: 12 }]}>A IA usa este arquivo como fonte das perguntas. Você pode escolher qualquer formato; arquivos com até 50 MB.</Text><Pressable accessibilityRole="button" accessibilityLabel={bookFile ? `Trocar arquivo ${bookFile.name}` : 'Enviar arquivo do livro'} onPress={() => void pickBookFile()} style={s.filePicker}>{bookFile ? <FileText color={c.purple} size={21} /> : <Upload color={c.purple} size={21} />}<View style={{ flex: 1, gap: 2 }}><Text numberOfLines={1} style={{ color: c.ink, fontSize: 13, fontWeight: '600' }}>{bookFile?.name ?? 'Escolher arquivo'}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{bookFile ? `${bookFile.mimeType || 'Formato do arquivo'}${displaySize(bookFile.size) ? ` · ${displaySize(bookFile.size)}` : ''}` : 'PDF, EPUB, DOCX, TXT ou outro formato'}</Text></View><Text style={{ color: c.purple, fontSize: 12, fontWeight: '600' }}>{bookFile ? 'Trocar' : 'Enviar'}</Text></Pressable></View><Input label="Sinopse e contexto da leitura (opcional)" placeholder="Se quiser, adicione um resumo ou orientação para a conversa." multiline value={bookDraft.synopsis} onChangeText={synopsis => setBookDraft({ ...bookDraft, synopsis })} maxLength={12000} /><Input label="Link da imagem da capa (opcional)" placeholder="https://…" value={bookDraft.cover_url ?? ''} onChangeText={cover_url => setBookDraft({ ...bookDraft, cover_url })} autoCapitalize="none" keyboardType="url" /><ErrorMessage message={error} /><Button title="Guardar na estante" onPress={saveBook} busy={busy} icon={<Plus size={18} color="#fff" />} /></ScrollArea></View></View></Modal>
   </SafeAreaView></View></SafeAreaProvider>;
 }
